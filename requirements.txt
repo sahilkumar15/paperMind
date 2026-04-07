@@ -1,10 +1,34 @@
+# ── Core agents ──────────────────────────────────────────────
 crewai>=0.80.0
 crewai-tools>=0.33.0
+litellm>=1.40.0           # REQUIRED for CrewAI to use Groq/non-OpenAI models
+
+# ── UI ───────────────────────────────────────────────────────
 streamlit>=1.40.0
-openai>=1.50.0
-anthropic>=0.40.0
+
+# ── LLM providers ────────────────────────────────────────────
+openai>=1.50.0            # also acts as Groq client (compatible API)
+groq>=0.9.0               # official Groq Python SDK
+
+# ── LangChain (KatzBot RAG) ──────────────────────────────────
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-openai>=0.2.0
+langchain-groq>=0.2.0
+langchain-chroma>=0.1.0   # replaces deprecated Chroma from langchain-community
+langchain-text-splitters>=0.3.0
+
+# ── Vector store + embeddings ─────────────────────────────────
+chromadb>=0.5.0
+sentence-transformers>=3.0.0   # free local embeddings (no API key needed)
+
+# ── Web crawling (KatzBot) ────────────────────────────────────
+unstructured>=0.14.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# ── Utilities ────────────────────────────────────────────────
 python-dotenv>=1.0.0
 requests>=2.31.0
-networkx>=3.0
-pyvis>=0.3.2
 pandas>=2.0.0
+anthropic>=0.40.0
