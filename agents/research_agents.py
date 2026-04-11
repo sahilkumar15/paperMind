@@ -1,166 +1,131 @@
 """
 agents/research_agents.py
-
-PaperMind — 6 specialized research agents.
-Provider-agnostic: works with Groq (free) or OpenAI.
+===========================
+GROQ FREE TIER FIX:
+  - Only llama-3.1-8b-instant works reliably on free tier:
+      250,000 TPM  (vs 6,000 for qwen, 12,000 for llama-70b)
+      14,400 req/day
+  - max_iter raised to 4 so the crawler actually gets to call its tool
+  - allow_delegation=False on all agents
+  - tools=[] on all non-crawler agents (no schema errors)
 """
 
 import os
 from crewai import Agent
-from crewai.tools import BaseTool
-from pydantic import BaseModel, Field
-from tools.semantic_scholar import search_and_format, get_recommendations, format_paper
-from llm_config import get_crewai_llm_string
+from llm_config import get_safe_crewai_llm_string, get_crewai_llm_string, get_provider, get_model_name
 
 
-# ── Custom CrewAI tools wrapping Semantic Scholar ─────────────
-class SearchInput(BaseModel):
-    query: str = Field(description="Academic search query string")
-    limit: int = Field(default=15, description="Max number of papers to return")
 
+def make_agents(include_planner: bool = True) -> list:
+    llm = get_safe_crewai_llm_string()
 
-class SemanticSearchTool(BaseTool):
-    name: str = "semantic_scholar_search"
-    description: str = (
-        "Search Semantic Scholar's database of 200M+ academic papers. "
-        "Returns titles, authors, abstracts, citation counts, and paper IDs."
-    )
-    args_schema: type[BaseModel] = SearchInput
+    from tools.semantic_scholar import semantic_scholar_search
 
-    def _run(self, query: str, limit: int = 15) -> str:
-        return search_and_format(query, limit)
-
-
-class RecommendInput(BaseModel):
-    paper_id: str = Field(description="Semantic Scholar paper ID")
-
-
-class RecommendTool(BaseTool):
-    name: str = "get_paper_recommendations"
-    description: str = (
-        "Given a Semantic Scholar paper ID, returns similar recommended papers."
-    )
-    args_schema: type[BaseModel] = RecommendInput
-
-    def _run(self, paper_id: str) -> str:
-        papers = get_recommendations(paper_id, limit=10)
-        if not papers:
-            return "No recommendations found for this paper ID."
-        return "\n\n".join(format_paper(p) for p in papers)
-
-
-search_tool    = SemanticSearchTool()
-recommend_tool = RecommendTool()
-
-
-# ── Agent 1: Crawler ─────────────────────────────────────────
-def create_crawler_agent() -> Agent:
-    return Agent(
+    # ── 1. Crawler — ONLY agent with a tool ──────────────────
+    crawler = Agent(
         role="Academic Paper Crawler",
         goal=(
-            "Find the most relevant, high-impact academic papers on the given "
-            "research topic using Semantic Scholar. Run at least 3 different search "
-            "queries. Find at least 15 papers. Prioritize highly cited recent work."
+            "Search Semantic Scholar to find 10-15 relevant academic papers "
+            "on the given research topic. Return a numbered list with title, "
+            "authors (first 2), year, citation count, 1-sentence abstract, and URL."
         ),
         backstory=(
-            "You are an expert academic librarian who has spent 20 years helping "
-            "researchers at MIT and Stanford find the exact papers they need. "
-            "You know how to craft precise search queries and identify seminal works."
+            "You are an expert academic librarian. You use the "
+            "semantic_scholar_search tool to find papers, then format the results."
         ),
-        tools=[search_tool, recommend_tool],
-        llm=get_crewai_llm_string(),
+        tools=[semantic_scholar_search],
+        llm=llm,
         verbose=True,
-        max_iter=6,
+        allow_delegation=False,
+        max_iter=5,           # needs iterations: think → tool call → format output
+        max_retry_limit=2,
     )
 
-
-# ── Agent 2: Reader ──────────────────────────────────────────
-def create_reader_agent() -> Agent:
-    return Agent(
-        role="Deep Paper Analyst",
+    # ── 2. Reader — no tools needed ──────────────────────────
+    reader = Agent(
+        role="Research Paper Analyst",
         goal=(
-            "For each paper, extract: core claim, methodology, key findings, "
-            "dataset used, limitations, and contribution type."
+            "For each paper in the provided list, write a 3-sentence extraction: "
+            "main claim, methodology, and key finding."
         ),
-        backstory=(
-            "You are a PhD researcher who has reviewed thousands of papers for "
-            "NeurIPS, ICML, and ACL. You produce clean structured extractions."
-        ),
-        llm=get_crewai_llm_string(),
+        backstory="You are a PhD researcher who rapidly extracts core insights from papers.",
+        tools=[],
+        llm=llm,
         verbose=True,
-        max_iter=4,
+        allow_delegation=False,
+        max_iter=3,
+        max_retry_limit=1,
     )
 
-
-# ── Agent 3: Mapper ──────────────────────────────────────────
-def create_mapper_agent() -> Agent:
-    return Agent(
+    # ── 3. Mapper ─────────────────────────────────────────────
+    mapper = Agent(
         role="Research Relationship Mapper",
         goal=(
-            "Analyze all papers and map: agreement clusters, contradictions, "
-            "citation lineage, methodological landscape, and consensus view."
+            "Based on the paper extractions, identify: "
+            "(1) agreement clusters, (2) contradictions, "
+            "(3) methodological trends. Keep under 300 words."
         ),
-        backstory=(
-            "You are a meta-researcher who specializes in understanding how fields "
-            "evolve. You spot debates, consensus views, outliers, and intellectual lineages."
-        ),
-        llm=get_crewai_llm_string(),
+        backstory="You are an expert in research synthesis and meta-analysis.",
+        tools=[],
+        llm=llm,
         verbose=True,
-        max_iter=4,
+        allow_delegation=False,
+        max_iter=3,
+        max_retry_limit=1,
     )
 
-
-# ── Agent 4: Gap Finder ──────────────────────────────────────
-def create_gap_finder_agent() -> Agent:
-    return Agent(
-        role="Research Gap Analyst",
+    # ── 4. Gap Finder ─────────────────────────────────────────
+    gap_finder = Agent(
+        role="Research Gap Identifier",
         goal=(
-            "Identify genuine research gaps: unexplored combinations, understudied "
-            "domains, unresolved contradictions, limitation opportunities, and "
-            "temporal gaps. Rank top 3 gaps by importance and feasibility."
+            "Identify exactly 3 unexplored research opportunities. "
+            "For each: gap name, what is missing, why it matters, suggested approach. "
+            "Keep each gap under 60 words. Total under 250 words."
         ),
-        backstory=(
-            "You are a grant reviewer and PhD advisor with a sharp eye for what's "
-            "missing in a field. Your gap analyses have led to top-venue publications."
-        ),
-        llm=get_crewai_llm_string(),
+        backstory="You are a research strategist who identifies white spaces in literature.",
+        tools=[],
+        llm=llm,
         verbose=True,
-        max_iter=4,
+        allow_delegation=False,
+        max_iter=3,
+        max_retry_limit=1,
     )
 
-
-# ── Agent 5: Writer ──────────────────────────────────────────
-def create_writer_agent() -> Agent:
-    return Agent(
+    # ── 5. Writer ─────────────────────────────────────────────
+    writer = Agent(
         role="Academic Literature Review Writer",
         goal=(
-            "Write a publication-quality literature review (600-900 words). "
-            "Organize thematically, synthesize (don't just summarize), highlight "
-            "debates, and position the research within the field."
+            "Write a 400-500 word academic literature review in flowing prose. "
+            "Cite papers as (Author et al., Year). No bullet points. "
+            "End with a paragraph on the top research gap."
         ),
-        backstory=(
-            "You are a prolific academic writer with 100+ published papers. "
-            "Your literature reviews are cited as models of clarity."
-        ),
-        llm=get_crewai_llm_string(),
+        backstory="You are an experienced academic writer for peer-reviewed journals.",
+        tools=[],
+        llm=llm,
         verbose=True,
-        max_iter=4,
-    )
-
-
-# ── Agent 6: Study Planner ───────────────────────────────────
-def create_planner_agent() -> Agent:
-    return Agent(
-        role="Research Study Planner",
-        goal=(
-            "Create a realistic day-by-day study and research plan. Prioritize "
-            "the most cited papers first. Include daily milestones and reading strategies."
-        ),
-        backstory=(
-            "You are an academic success coach who helps grad students manage "
-            "overwhelming reading lists using spaced repetition and deep work scheduling."
-        ),
-        llm=get_crewai_llm_string(),
-        verbose=True,
+        allow_delegation=False,
         max_iter=3,
+        max_retry_limit=1,
     )
+
+    agents = [crawler, reader, mapper, gap_finder, writer]
+
+    # ── 6. Study Planner (optional) ───────────────────────────
+    if include_planner:
+        planner = Agent(
+            role="Study Planner",
+            goal=(
+                "Create a day-by-day study plan naming specific papers each day. "
+                "Keep total under 300 words."
+            ),
+            backstory="You are an academic coach who creates realistic study plans.",
+            tools=[],
+            llm=llm,
+            verbose=True,
+            allow_delegation=False,
+            max_iter=3,
+            max_retry_limit=1,
+        )
+        agents.append(planner)
+
+    return agents

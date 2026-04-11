@@ -1,34 +1,59 @@
+# ══════════════════════════════════════════════════════════════
+# PaperMind + KatzBot — requirements.txt (April 2026)
+# ══════════════════════════════════════════════════════════════
+#
+# Install: pip install -r requirements.txt
+#
+# KatzBot uses FAISS (same as original notebook) for fast local
+# vector search with no external service required.
+
 # ── Core agents ──────────────────────────────────────────────
 crewai>=0.80.0
 crewai-tools>=0.33.0
-litellm>=1.40.0           # REQUIRED for CrewAI to use Groq/non-OpenAI models
+litellm>=1.40.0
 
 # ── UI ───────────────────────────────────────────────────────
 streamlit>=1.40.0
 
 # ── LLM providers ────────────────────────────────────────────
-openai>=1.50.0            # also acts as Groq client (compatible API)
-groq>=0.9.0               # official Groq Python SDK
+openai>=1.50.0
+groq>=0.9.0
 
-# ── LangChain (KatzBot RAG) ──────────────────────────────────
+# ── LangChain core ───────────────────────────────────────────
 langchain>=0.3.0
+langchain-core>=0.3.0
 langchain-community>=0.3.0
 langchain-openai>=0.2.0
 langchain-groq>=0.2.0
-langchain-chroma>=0.1.0   # replaces deprecated Chroma from langchain-community
 langchain-text-splitters>=0.3.0
 
-# ── Vector store + embeddings ─────────────────────────────────
-chromadb>=0.5.0
-sentence-transformers>=3.0.0   # free local embeddings (no API key needed)
+# ── Vector stores ─────────────────────────────────────────────
+# FAISS — primary (same as original notebook, fast local search)
+faiss-cpu>=1.8.0             # CPU version — use faiss-gpu if you have CUDA
 
-# ── Web crawling (KatzBot) ────────────────────────────────────
-unstructured>=0.14.0
+# Chroma — optional fallback
+langchain-chroma>=0.1.0
+chromadb>=0.5.0
+
+# ── Embeddings ────────────────────────────────────────────────
+# HuggingFace embeddings — same model as original notebook (all-MiniLM-L6-v2)
+sentence-transformers>=3.0.0
+
+# ── Web crawling ──────────────────────────────────────────────
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
+requests>=2.31.0
+
+# ── Data handling (used in original notebook evaluation) ──────
+pandas>=2.0.0
 
 # ── Utilities ────────────────────────────────────────────────
 python-dotenv>=1.0.0
-requests>=2.31.0
-pandas>=2.0.0
 anthropic>=0.40.0
+
+# ── Optional: HuggingFace LLM pipeline (notebook's original LLM) ─
+# Only needed if you want to run local HF models instead of Groq
+# transformers>=4.40.0
+# torch>=2.0.0
+# accelerate>=0.27.0
+# bitsandbytes>=0.43.0    # for 4-bit quantization (Zephyr-7B etc.)

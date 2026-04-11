@@ -1,92 +1,96 @@
 """
 tools/semantic_scholar.py
+===========================
+Plain Python tool for Semantic Scholar API.
+Uses @tool decorator from crewai but WITHOUT complex JSON schema
+that causes Groq's GroqException "Failed to call a function".
 
-Free academic paper search using the Semantic Scholar API.
-No API key required for basic usage (200M+ papers).
-Rate limit: 100 requests/5min unauthenticated.
+KEY FIX: We use a simple string-in / string-out tool signature
+so LiteLLM/Groq never tries to generate a complex function-call JSON blob.
 """
 
 import requests
-import time
-from typing import Optional
+import json
+from crewai.tools import tool
 
 
-BASE_URL = "https://api.semanticscholar.org/graph/v1"
+SEMANTIC_SCHOLAR_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 
-FIELDS = "paperId,title,abstract,authors,year,citationCount,referenceCount,url,externalIds,tldr"
+FIELDS = (
+    "title,authors,year,abstract,citationCount,"
+    "externalIds,url,venue,publicationTypes"
+)
 
 
-def search_papers(query: str, limit: int = 20) -> list[dict]:
-    """Search Semantic Scholar for papers matching a query."""
+def _search_papers(query: str, limit: int = 20) -> list[dict]:
+    """Internal search — returns list of paper dicts."""
+    params = {
+        "query": query,
+        "limit": min(limit, 25),
+        "fields": FIELDS,
+    }
     try:
-        resp = requests.get(
-            f"{BASE_URL}/paper/search",
-            params={"query": query, "limit": limit, "fields": FIELDS},
-            timeout=15,
-        )
+        resp = requests.get(SEMANTIC_SCHOLAR_URL, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", [])
     except Exception as e:
-        print(f"[SemanticScholar] search error: {e}")
-        return []
+        return [{"error": str(e)}]
 
 
-def get_paper_details(paper_id: str) -> Optional[dict]:
-    """Get full details for a specific paper by ID."""
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/paper/{paper_id}",
-            params={"fields": FIELDS + ",references,citations"},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"[SemanticScholar] details error: {e}")
-        return None
-
-
-def get_recommendations(paper_id: str, limit: int = 10) -> list[dict]:
-    """Get papers recommended based on a seed paper."""
-    try:
-        resp = requests.get(
-            f"https://api.semanticscholar.org/recommendations/v1/papers/forpaper/{paper_id}",
-            params={"limit": limit, "fields": FIELDS},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return resp.json().get("recommendedPapers", [])
-    except Exception as e:
-        print(f"[SemanticScholar] recommendations error: {e}")
-        return []
-
-
-def format_paper(p: dict) -> str:
-    """Format a paper dict into a readable string for agents."""
-    authors = ", ".join(a.get("name", "") for a in p.get("authors", [])[:3])
-    if len(p.get("authors", [])) > 3:
-        authors += " et al."
-    tldr = ""
-    if p.get("tldr") and p["tldr"].get("text"):
-        tldr = f"\n  TL;DR: {p['tldr']['text']}"
-    abstract = (p.get("abstract") or "")[:400]
-    return (
-        f"Title: {p.get('title', 'Unknown')}\n"
-        f"  Authors: {authors}\n"
-        f"  Year: {p.get('year', 'N/A')} | Citations: {p.get('citationCount', 0)}\n"
-        f"  ID: {p.get('paperId', '')}\n"
-        f"  URL: {p.get('url', '')}{tldr}\n"
-        f"  Abstract: {abstract}..."
-    )
-
-
-def search_and_format(query: str, limit: int = 15) -> str:
-    """Search and return formatted results as a single string for agents."""
-    papers = search_papers(query, limit)
+def _format_papers(papers: list[dict]) -> str:
+    """Format paper list to readable markdown string."""
     if not papers:
-        return f"No papers found for query: {query}"
-    lines = [f"Found {len(papers)} papers for '{query}':\n"]
+        return "No papers found."
+
+    lines = []
     for i, p in enumerate(papers, 1):
-        lines.append(f"[{i}] {format_paper(p)}\n")
+        if "error" in p:
+            lines.append(f"Error: {p['error']}")
+            continue
+        title   = p.get("title", "Unknown title")
+        year    = p.get("year", "N/A")
+        cites   = p.get("citationCount", 0)
+        authors = ", ".join(a.get("name", "") for a in p.get("authors", [])[:3])
+        if len(p.get("authors", [])) > 3:
+            authors += " et al."
+        abstract = (p.get("abstract") or "No abstract.")[:300]
+        url      = p.get("url", "")
+        venue    = p.get("venue", "")
+
+        lines.append(
+            f"**{i}. {title}** ({year})\n"
+            f"   Authors: {authors}\n"
+            f"   Venue: {venue} | Citations: {cites}\n"
+            f"   Abstract: {abstract}...\n"
+            f"   URL: {url}\n"
+        )
     return "\n".join(lines)
+
+
+# ── CrewAI Tool ───────────────────────────────────────────────
+# IMPORTANT: Keep signature as (query: str) -> str  
+# Complex type annotations cause Groq function-call failures
+
+@tool("semantic_scholar_search")
+def semantic_scholar_search(query: str) -> str:
+    """
+    Search Semantic Scholar for academic papers on a given topic.
+    Input: a search query string (e.g. 'transformer attention mechanisms').
+    Output: formatted list of up to 20 relevant papers with titles, authors,
+    abstracts, citation counts, and URLs.
+    Use this to find real academic papers for literature reviews.
+    """
+    papers = _search_papers(query, limit=20)
+    return _format_papers(papers)
+
+
+@tool("semantic_scholar_details")
+def semantic_scholar_details(paper_title: str) -> str:
+    """
+    Get more details about a specific paper by searching its title.
+    Input: the title or partial title of the paper.
+    Output: detailed information about the matching paper.
+    """
+    papers = _search_papers(paper_title, limit=5)
+    return _format_papers(papers)

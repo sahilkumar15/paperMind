@@ -1,19 +1,16 @@
 """
 agents/tasks.py
+================
+TOKEN-EFFICIENT tasks designed for Groq free tier (250K TPM with llama-3.1-8b-instant).
 
-Defines all tasks for PaperMind's research pipeline + study planner.
-Each task feeds into the next — outputs are shared as context.
+Key rules:
+  - Each task output is SHORT (300-600 words max)
+  - Context passed between tasks is TRIMMED (not full previous output)
+  - Task descriptions are concise to minimize input tokens
 """
 
 from crewai import Task
-from agents.research_agents import (
-    create_crawler_agent,
-    create_reader_agent,
-    create_mapper_agent,
-    create_gap_finder_agent,
-    create_writer_agent,
-    create_planner_agent,
-)
+from agents.research_agents import make_agents
 
 
 def build_research_tasks(
@@ -22,191 +19,117 @@ def build_research_tasks(
     days: int = 7,
     hours_per_day: float = 3.0,
     include_planner: bool = True,
-):
-    """
-    Build all agents and tasks for the full PaperMind pipeline.
+) -> tuple:
+    agents     = make_agents(include_planner=include_planner)
+    crawler    = agents[0]
+    reader     = agents[1]
+    mapper     = agents[2]
+    gap_finder = agents[3]
+    writer     = agents[4]
+    planner    = agents[5] if include_planner and len(agents) > 5 else None
 
-    Returns: (agents_list, tasks_list)
-    """
-
-    crawler    = create_crawler_agent()
-    reader     = create_reader_agent()
-    mapper     = create_mapper_agent()
-    gap_finder = create_gap_finder_agent()
-    writer     = create_writer_agent()
-    planner    = create_planner_agent()
-
-    rq = research_question or f"What are the key developments, debates, and open problems in {topic}?"
+    rq = f" Research question: {research_question}." if research_question else ""
 
     # ── Task 1: Crawl ─────────────────────────────────────────
-    crawl_task = Task(
+    task_crawl = Task(
         description=(
-            f"Search Semantic Scholar for papers on: **{topic}**\n\n"
-            f"Research question to guide your search: {rq}\n\n"
-            "Run AT LEAST 3 different search queries to cover the topic from different angles.\n"
-            "For example, for 'Agentic AI': search 'agentic AI systems', 'autonomous AI agents', "
-            "'multi-agent LLM frameworks'.\n\n"
-            "For each search, collect the top results. Then use the recommendation tool on the "
-            "2-3 most highly cited papers to find additional related work.\n\n"
-            "TARGET: Identify at least 15 relevant papers total.\n\n"
-            "Output format for each paper:\n"
-            "- Title\n"
-            "- Authors + Year\n"
-            "- Citation count\n"
-            "- Semantic Scholar ID\n"
-            "- 1-sentence relevance note\n"
-            "- Abstract (truncated to 150 words)"
+            f"Search Semantic Scholar for papers on: '{topic}'.{rq}\n"
+            f"Call the semantic_scholar_search tool with query: '{topic}'.\n"
+            f"Format results as a numbered list (10-15 papers):\n"
+            f"[N]. Title (Year) — Authors — Citations: X\n"
+            f"Summary: one sentence.\nURL: ...\n"
+            f"Total output: under 500 words."
         ),
         expected_output=(
-            "A structured list of 15–25 relevant academic papers with title, authors, "
-            "year, citation count, paper ID, and abstract for each. Organized by relevance."
+            "Numbered list of 10-15 papers. Each entry: title, year, "
+            "authors, citation count, 1-sentence summary, URL. Under 500 words."
         ),
         agent=crawler,
     )
 
-    # ── Task 2: Read + Extract ───────────────────────────────
-    read_task = Task(
+    # ── Task 2: Read ──────────────────────────────────────────
+    task_read = Task(
         description=(
-            f"You have a list of papers on **{topic}** from the Crawler agent.\n\n"
-            "For EACH paper, extract the following in a structured format:\n\n"
-            "1. **Core Claim** — What is the single main argument/contribution? (1-2 sentences)\n"
-            "2. **Methodology** — What approach/technique do they use? (e.g., transformer-based, "
-            "   reinforcement learning, survey, empirical study)\n"
-            "3. **Key Findings** — What did they prove/show/discover? (2-3 bullet points)\n"
-            "4. **Dataset/Benchmark** — What data or evaluation benchmark did they use?\n"
-            "5. **Limitations** — What do the authors admit their work doesn't cover?\n"
-            "6. **Contribution Type** — Is this: theory / system / empirical / survey / position paper?\n\n"
-            "Focus on the abstracts and conclusions provided. Be precise and objective.\n"
-            "Do NOT include papers that are clearly irrelevant to the research question."
+            f"Papers on '{topic}' are listed above.\n"
+            f"For each paper write ONE paragraph (2-3 sentences):\n"
+            f"Claim: ... Method: ... Finding: ...\n"
+            f"Total output: under 500 words."
         ),
         expected_output=(
-            "A structured extraction for each paper with: core claim, methodology, "
-            "key findings (bullets), dataset used, limitations, and contribution type."
+            "One short paragraph per paper with claim, method, finding. "
+            "Under 500 words total."
         ),
         agent=reader,
-        context=[crawl_task],
+        context=[task_crawl],
     )
 
-    # ── Task 3: Map Relationships ────────────────────────────
-    map_task = Task(
+    # ── Task 3: Map ───────────────────────────────────────────
+    task_map = Task(
         description=(
-            f"You have structured extractions of papers on **{topic}**.\n\n"
-            "Analyze all papers together and produce a relationship map:\n\n"
-            "**A. Agreement Clusters**\n"
-            "Group papers that share the same core argument or finding. "
-            "Name each cluster (e.g., 'RAG-based approaches', 'Role-based agent frameworks').\n\n"
-            "**B. Contradictions & Debates**\n"
-            "Identify pairs or groups of papers that contradict each other or represent "
-            "competing approaches. Explain what they disagree on specifically.\n\n"
-            "**C. Citation Lineage**\n"
-            "Identify foundational/seminal papers that most other papers build upon. "
-            "Identify the most recent papers pushing the frontier.\n\n"
-            "**D. Methodological Landscape**\n"
-            "Map which methods/approaches are most common, which are emerging, which are declining.\n\n"
-            "**E. Consensus View**\n"
-            "What does the field broadly agree on? What is still contested?\n\n"
-            "Format as clearly labeled sections with paper titles referenced by [Author, Year]."
+            f"Based on the paper extractions for '{topic}', write 3 short sections:\n"
+            f"## Agreements\n(2-3 sentences)\n"
+            f"## Contradictions\n(2-3 sentences)\n"
+            f"## Methodological Trends\n(2-3 sentences)\n"
+            f"Total: under 250 words."
         ),
         expected_output=(
-            "A relationship map with 5 sections: agreement clusters, contradictions/debates, "
-            "citation lineage, methodological landscape, and field consensus summary."
+            "Three sections (Agreements, Contradictions, Methodological Trends), "
+            "each 2-3 sentences. Under 250 words."
         ),
         agent=mapper,
-        context=[crawl_task, read_task],
+        context=[task_read],
     )
 
-    # ── Task 4: Find Gaps ────────────────────────────────────
-    gap_task = Task(
+    # ── Task 4: Gaps ──────────────────────────────────────────
+    task_gaps = Task(
         description=(
-            f"You have a complete analysis of the literature on **{topic}**.\n"
-            f"The student's research question is: {rq}\n\n"
-            "Identify genuine, actionable research gaps:\n\n"
-            "**A. Unexplored Combinations**\n"
-            "What combinations of methods/ideas have NOT been tried together?\n\n"
-            "**B. Understudied Populations/Domains**\n"
-            "What contexts, domains, languages, or populations have existing work ignored?\n\n"
-            "**C. Unresolved Contradictions**\n"
-            "Where papers disagree — what experiment would settle the debate?\n\n"
-            "**D. Limitation Opportunities**\n"
-            "What limitations do authors admit? Each limitation = a potential research opportunity.\n\n"
-            "**E. Temporal Gaps**\n"
-            "What was studied 5+ years ago but hasn't been revisited with modern models/data?\n\n"
-            "**F. Top 3 Recommended Gaps**\n"
-            "Rank the top 3 most promising gaps for a grad student to pursue. "
-            "For each: explain the gap, why it matters, and what a paper addressing it might look like.\n\n"
-            "Be specific — cite actual paper titles that make these gaps evident."
+            f"Based on papers about '{topic}', list 3 research gaps.{rq}\n"
+            f"Format each gap as:\n"
+            f"**Gap [N]: [Name]**\n"
+            f"Missing: ... Matters: ... Approach: ...\n"
+            f"Total: under 250 words."
         ),
         expected_output=(
-            "A gap analysis with 5 gap categories and a ranked top-3 list of the most "
-            "promising research opportunities, each with a brief research proposal sketch."
+            "3 research gaps, each with name, what is missing, why it matters, "
+            "and suggested approach. Under 250 words."
         ),
         agent=gap_finder,
-        context=[crawl_task, read_task, map_task],
+        context=[task_map],
     )
 
-    # ── Task 5: Write Literature Review ──────────────────────
-    write_task = Task(
+    # ── Task 5: Literature Review ─────────────────────────────
+    task_litrev = Task(
         description=(
-            f"Write a publication-quality **Literature Review** section for a research paper on:\n"
-            f"**{topic}**\n\n"
-            "Use ALL the analysis from previous agents as your source material.\n\n"
-            "Structure:\n"
-            "1. **Introduction paragraph** — Motivate the topic, state the scope of this review\n"
-            "2. **Thematic sections** (2-4 sections based on the clusters from the Mapper)\n"
-            "   - Each section synthesizes a cluster of related work\n"
-            "   - Compare and contrast — don't just list papers\n"
-            "   - Highlight debates and unresolved questions\n"
-            "3. **Methodological Overview** — Brief summary of dominant methods used in the field\n"
-            "4. **Research Gaps** — Transition from what exists to what's missing\n"
-            "5. **Positioning paragraph** — 'This work addresses the gap by...'\n\n"
-            "Citation format: [Author et al., Year] inline.\n"
-            "Target length: 600–900 words.\n"
-            "Tone: academic but clear. Synthesize, don't just describe.\n\n"
-            "IMPORTANT: This must read like a real literature review, not a list of summaries."
+            f"Write a literature review on '{topic}'.{rq}\n"
+            f"Rules: 400-500 words, academic prose, no bullets.\n"
+            f"Cite as (Author et al., Year).\n"
+            f"Structure: intro → themes → synthesis → gap positioning."
         ),
         expected_output=(
-            "A complete, well-structured literature review section (600-900 words) organized "
-            "thematically with inline citations, synthesis of debates, and a clear gap statement."
+            "400-500 word literature review in academic prose, citing papers, "
+            "ending with gap positioning."
         ),
         agent=writer,
-        context=[crawl_task, read_task, map_task, gap_task],
+        context=[task_crawl, task_map, task_gaps],
     )
 
-    agents = [crawler, reader, mapper, gap_finder, writer]
-    tasks  = [crawl_task, read_task, map_task, gap_task, write_task]
+    tasks = [task_crawl, task_read, task_map, task_gaps, task_litrev]
 
-    # ── Task 6: Study Plan (optional) ────────────────────────
-    if include_planner:
-        plan_task = Task(
+    # ── Task 6: Study Plan ────────────────────────────────────
+    if include_planner and planner:
+        task_plan = Task(
             description=(
-                f"Create a {days}-day reading and research plan for the student studying **{topic}**.\n\n"
-                f"Constraints: {days} days available, {hours_per_day} hours/day.\n\n"
-                "Use the paper list from the Crawler to build the plan.\n\n"
-                "Structure:\n"
-                "**Priority 1 (Days 1-2): Foundational Papers**\n"
-                "- List the 3-4 most-cited seminal papers — must read first\n"
-                "- For each: estimated read time, what to take notes on\n\n"
-                "**Priority 2 (Days 3-5): Core Literature**\n"
-                "- The main body of relevant papers, grouped by theme\n"
-                "- Reading strategy: skim vs deep read for each\n\n"
-                "**Priority 3 (Days 6-7): Synthesis & Writing**\n"
-                "- Day 6: Organize notes, build argument structure\n"
-                "- Day 7: Draft the literature review using the generated draft as a starting point\n\n"
-                "**Daily Schedule Template:**\n"
-                "Morning (X hrs): [specific activity]\n"
-                "Afternoon (X hrs): [specific activity]\n"
-                "End of day: [milestone checkpoint]\n\n"
-                "Also include: recommended note-taking method, "
-                "tools to use (Zotero, Obsidian, etc.), and weekly milestone."
+                f"Create a {days}-day study plan for '{topic}'.\n"
+                f"Time budget: {hours_per_day}h/day.{rq}\n"
+                f"Format: **Day X** — Focus — Papers to read\n"
+                f"Name actual papers from the list. Under 300 words."
             ),
             expected_output=(
-                "A complete day-by-day reading and research plan with prioritized paper list, "
-                "daily schedule template, reading strategies, and milestone checkpoints."
+                f"Day-by-day plan for {days} days naming specific papers. Under 300 words."
             ),
             agent=planner,
-            context=[crawl_task, gap_task],
+            context=[task_crawl, task_gaps],
         )
-        agents.append(planner)
-        tasks.append(plan_task)
+        tasks.append(task_plan)
 
     return agents, tasks

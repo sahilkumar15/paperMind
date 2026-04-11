@@ -98,6 +98,9 @@ for k, v in {
     "katz_chat": [],       # KatzBot chat
     "topic": "",
     "katzbot_ready": False,
+    "citations": [],
+    "bib_file": "",
+    "bib_saved": "",
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -252,7 +255,7 @@ st.markdown("""
 # ── Tabs ──────────────────────────────────────────────────────
 (tab_run, tab_papers, tab_map, tab_gaps,
  tab_litrev, tab_plan, tab_chat,
- tab_katzbot, tab_faculty) = st.tabs([
+ tab_katzbot, tab_faculty, tab_citations) = st.tabs([
     "⚡ Run Agents",
     "📄 Papers Found",
     "🗺️ Relationship Map",
@@ -262,6 +265,7 @@ st.markdown("""
     "💬 PaperBot",
     "🎓 KatzBot",
     "👨‍🏫 Faculty Match",
+    "📚 Citations (.bib)",
 ])
 
 
@@ -609,12 +613,13 @@ with tab_katzbot:
             try:
                 from katzbot.rag_engine import get_engine
                 engine = get_engine()
-                engine._ensure_loaded()
+                stats = engine.build(force_refresh=True)
+                st.session_state.katzbot_ready = True
                 st.session_state.katzbot_ready = True
                 st.success("✅ KatzBot index ready!")
             except Exception as e:
                 st.error(f"Index build failed: {e}")
-                st.info("Make sure OPENAI_API_KEY is set in your .env file.")
+                st.info("Tip: Set GROQ_API_KEY in .env.")
 
     # Chat display
     if not st.session_state.katz_chat:
@@ -669,7 +674,7 @@ with tab_katzbot:
                 if st.session_state.results:
                     extra_ctx = st.session_state.results.get("gaps", "")[:500]
 
-                result = engine.ask(katz_input, extra_context=extra_ctx)
+                result = engine.ask(katz_input, history=st.session_state.katz_chat, extra_context=extra_ctx)
                 answer  = result["answer"]
                 sources = result["sources"]
 
@@ -723,7 +728,7 @@ with tab_faculty:
         "</div>", unsafe_allow_html=True,
     )
 
-    from katzbot.rag_engine import match_faculty, KATZ_FACULTY
+    from katzbot.faculty import match_faculty, KATZ_FACULTY
 
     # Auto-match from topic if agents have run
     search_topic = st.session_state.topic or topic
@@ -829,3 +834,287 @@ with tab_faculty:
     Thank you for your time."
     </div>
     """, unsafe_allow_html=True)
+
+
+
+
+# ══════════════════════════════════════════════════════════════
+# TAB 10 — CITATIONS (.bib)
+# ══════════════════════════════════════════════════════════════
+with tab_citations:
+    st.markdown("### 📚 BibTeX Citations — Overleaf Ready")
+
+    st.markdown("""
+    <div style="background:#0A1628;border:1px solid #1F6FEB;border-radius:8px;
+    padding:.8rem 1rem;font-size:.84rem;color:#58A6FF;margin-bottom:1rem;line-height:1.7">
+    <b>How it works:</b> Titles extracted from Papers tab →
+    matched against <b>Semantic Scholar API</b> (with automatic retry on rate limits)
+    → exact BibTeX built from real metadata. Unmatched titles are filled via topic search.
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not st.session_state.results or not st.session_state.results.get("papers","").strip():
+        st.markdown("""
+        <div style="background:#161B22;border:1px solid #30363D;border-radius:8px;
+        padding:2rem;text-align:center;color:#8B949E">
+            <div style="font-size:1.8rem;margin-bottom:.4rem">📄</div>
+            <div style="color:#C9D1D9;font-weight:500;margin-bottom:.3rem">No papers yet</div>
+            Run the agents first (⚡ Run Agents tab), then return here.
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        papers_text   = st.session_state.results.get("papers","")
+        current_topic = st.session_state.topic or topic
+
+        # ── Prompt banner if not yet fetched ─────────────────
+        if not st.session_state.citations:
+            st.markdown("""
+            <div style="background:#1C1A10;border:1px solid #D29922;border-radius:8px;
+            padding:.7rem 1rem;font-size:.84rem;color:#D29922;margin-bottom:.8rem">
+            ⚡ Papers are ready. Click <b>Fetch BibTeX</b> to get exact citations.
+            This takes 2–4 minutes (Semantic Scholar rate limits to ~1 request/2s).
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── Action bar ────────────────────────────────────────
+        ac1, ac2, ac3 = st.columns([2, 2, 3])
+        with ac1:
+            fetch_btn = st.button(
+                "🔍 Fetch BibTeX",
+                key="fetch_cit_btn",
+                use_container_width=True,
+                type="primary",
+            )
+        with ac2:
+            if st.session_state.citations:
+                st.download_button(
+                    "⬇️ Download references.bib",
+                    data=st.session_state.bib_file,
+                    file_name=f"references_{current_topic[:20].replace(' ','_')}.bib",
+                    mime="text/plain",
+                    use_container_width=True,
+                    key="dl_bib_top",
+                )
+        with ac3:
+            if st.session_state.citations:
+                n = len(st.session_state.citations)
+                st.markdown(
+                    f"<div style='color:#3FB950;font-size:.84rem;padding:.4rem 0'>"
+                    f"✅ {n} verified citations ready</div>",
+                    unsafe_allow_html=True
+                )
+
+        # ── Fetch handler ─────────────────────────────────────
+        if fetch_btn:
+            prog      = st.progress(0, text="Starting…")
+            status    = st.empty()
+
+            try:
+                from tools.citation_fetcher import (
+                    fetch_citations_from_papers_text,
+                    extract_titles_from_text,
+                    build_bib_file,
+                )
+
+                # Show how many titles we found
+                titles = extract_titles_from_text(papers_text)
+                n_titles = len(titles)
+
+                status.info(
+                    f"📖 Found **{n_titles} paper titles** in agent output. "
+                    f"Searching Semantic Scholar… (allow 2–4 min due to API rate limits)"
+                )
+                prog.progress(10, text=f"Searching {n_titles} titles on Semantic Scholar…")
+
+                if n_titles == 0:
+                    status.warning(
+                        "Could not extract titles from agent output — "
+                        "falling back to topic search."
+                    )
+
+                citations = fetch_citations_from_papers_text(
+                    papers_text=papers_text,
+                    topic=current_topic,
+                    delay=2.5,
+                )
+
+                prog.progress(95, text="Building .bib file…")
+
+                if citations:
+                    from tools.citation_fetcher import (
+                        save_bib_to_disk, print_citations_summary
+                    )
+                    bib      = build_bib_file(citations, topic=current_topic)
+                    saved_to = save_bib_to_disk(bib, topic=current_topic,
+                                                output_dir="outputs")
+                    print_citations_summary(citations)
+
+                    st.session_state.citations  = citations
+                    st.session_state.bib_file   = bib
+                    st.session_state.bib_saved  = saved_to
+                    prog.progress(100, text="Done!")
+                    status.success(
+                        f"✅ **{len(citations)} citations fetched!** "
+                        f"Auto-saved → `{saved_to}`"
+                    )
+                else:
+                    prog.progress(100, text="Failed")
+                    status.error(
+                        "Could not fetch any citations. "
+                        "Semantic Scholar may be temporarily unavailable. "
+                        "Wait 60 seconds and try again."
+                    )
+
+            except Exception as e:
+                prog.progress(100, text="Error")
+                status.error(f"Error: {e}")
+
+            st.rerun()
+
+        # ══════════════════════════════════════════════════════
+        # RESULTS — shown once citations are fetched
+        # ══════════════════════════════════════════════════════
+        if st.session_state.citations:
+            citations = st.session_state.citations
+
+            # ── Metrics ───────────────────────────────────────
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Papers",   len(citations))
+            m2.metric("With DOI",       sum(1 for c in citations if c.get("doi")))
+            m3.metric("On arXiv",       sum(1 for c in citations if c.get("arxiv")))
+            m4.metric("Conf / Journal", 
+                f"{sum(1 for c in citations if '@inproceedings' in c.get('bibtex',''))} / "
+                f"{sum(1 for c in citations if '@article' in c.get('bibtex',''))}"
+            )
+
+            st.markdown("---")
+
+            # ── Full .bib file block ───────────────────────────
+            st.markdown("#### 📄 Full `.bib` File")
+            st.markdown(
+                "<div style='font-size:.82rem;color:#8B949E;margin-bottom:.4rem'>"
+                "Copy everything below and paste into Overleaf, "
+                "or use the download button.</div>",
+                unsafe_allow_html=True
+            )
+
+            # The big text area — easy select-all copy
+            st.text_area(
+                label="references.bib — select all (Ctrl+A) and copy:",
+                value=st.session_state.bib_file,
+                height=320,
+                key="bib_main_textarea",
+                label_visibility="visible",
+            )
+
+            dl1, dl2 = st.columns(2)
+            with dl1:
+                st.download_button(
+                    "⬇️ Download references.bib",
+                    data=st.session_state.bib_file,
+                    file_name=f"references_{current_topic[:20].replace(' ','_')}.bib",
+                    mime="text/plain",
+                    use_container_width=True,
+                    key="dl_bib_main2",
+                )
+            with dl2:
+                if st.button("🔄 Re-fetch citations", key="refetch_btn",
+                             use_container_width=True):
+                    st.session_state.citations = []
+                    st.session_state.bib_file  = ""
+                    st.rerun()
+
+            st.markdown("---")
+
+            # ── Individual citation cards ─────────────────────
+            st.markdown(f"#### Individual Entries ({len(citations)} papers)")
+
+            for i, cit in enumerate(citations, 1):
+                title  = cit.get("title","Unknown")
+                auths  = cit.get("authors",[])
+                year   = cit.get("year","")
+                venue  = cit.get("venue","")
+                doi    = cit.get("doi","")
+                arxiv  = cit.get("arxiv","")
+                url    = cit.get("url","")
+                key    = cit.get("cite_key",f"paper{i}")
+                cites  = cit.get("citation_count",0)
+                bibtex = cit.get("bibtex","")
+                icon   = "🏛️" if "@inproceedings" in bibtex else "📰"
+
+                auth_str = ", ".join(auths[:3]) + (" et al." if len(auths)>3 else "")
+
+                links = []
+                if doi:
+                    links.append(f'<a href="https://doi.org/{doi}" target="_blank" '
+                        f'style="color:#58A6FF;font-size:.76rem">🔗 DOI</a>')
+                if arxiv:
+                    links.append(f'<a href="https://arxiv.org/abs/{arxiv}" target="_blank" '
+                        f'style="color:#58A6FF;font-size:.76rem">📋 arXiv</a>')
+                if url and not doi and not arxiv:
+                    links.append(f'<a href="{url}" target="_blank" '
+                        f'style="color:#58A6FF;font-size:.76rem">🔗 Paper</a>')
+
+                st.markdown(f"""
+                <div style="background:#161B22;border:1px solid #30363D;
+                border-left:3px solid #1F6FEB;border-radius:0 8px 8px 0;
+                padding:.85rem 1.1rem;margin:.35rem 0">
+                    <div style="font-weight:600;color:#E6EDF3;font-size:.9rem;
+                    margin-bottom:.2rem">{icon} {i}. {title}</div>
+                    <div style="color:#8B949E;font-size:.76rem;margin-bottom:.3rem">
+                        {auth_str}
+                        {"· <b style='color:#C9D1D9'>" + str(year) + "</b>" if year else ""}
+                        {" · " + venue[:55] if venue else ""}
+                        {" · " + str(cites) + " citations" if cites else ""}
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        <code style="background:#1F3A5F;color:#79C0FF;padding:2px 9px;
+                        border-radius:4px;font-size:.76rem">\\cite{{{key}}}</code>
+                        {"  ".join(links)}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                with st.expander(f"BibTeX  \\cite{{{key}}}", expanded=False):
+                    st.code(bibtex, language="bibtex")
+                    st.text_area(
+                        "Copy:", value=bibtex, height=160,
+                        key=f"bib_ta_{i}", label_visibility="visible"
+                    )
+                    st.download_button(
+                        f"⬇️ {key}.bib",
+                        data=bibtex,
+                        file_name=f"{key}.bib",
+                        mime="text/plain",
+                        key=f"dl_single_{i}",
+                    )
+
+            # ── Overleaf guide ────────────────────────────────
+            st.markdown("---")
+            st.markdown("""
+            <div style="background:#161B22;border:1px solid #30363D;border-radius:10px;
+            padding:1.1rem 1.3rem">
+              <div style="font-weight:600;color:#E6EDF3;margin-bottom:.7rem">
+              📎 How to use in Overleaf
+              </div>
+              <div style="font-size:.84rem;color:#C9D1D9;line-height:2.1">
+              <b style="color:#D29922">1.</b> Download <code>references.bib</code>
+              (button above)<br>
+              <b style="color:#D29922">2.</b> Overleaf → <b>Upload</b> →
+              select <code>references.bib</code><br>
+              <b style="color:#D29922">3.</b> Add before
+              <code>\\end{document}</code>:<br>
+              &nbsp;&nbsp;&nbsp;
+              <code style="color:#79C0FF">\\bibliographystyle{ieeetr}</code><br>
+              &nbsp;&nbsp;&nbsp;
+              <code style="color:#79C0FF">\\bibliography{references}</code><br>
+              <b style="color:#D29922">4.</b> In your text:
+              <code style="color:#79C0FF">\\cite{He2016Deep}</code> or
+              <code style="color:#79C0FF">\\cite{key1,key2,key3}</code><br>
+              <b style="color:#D29922">5.</b> Compile twice → references appear ✅
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            
+# streamlit run app.py
