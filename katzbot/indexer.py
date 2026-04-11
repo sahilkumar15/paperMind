@@ -1,107 +1,159 @@
 """
 katzbot/indexer.py
 ===================
-Vector store builder — upgraded from the notebook's FAISS approach.
+FAISS vector store with persistent disk caching.
 
-Original notebook:
-  - FAISS.from_documents(docs, embeddings)
-  - Retriever: similarity search, k=3
-  - Embeddings: all-MiniLM-l6-v2 on CUDA
+Why this version works:
+- FAISS binary index is the primary fast-load artifact.
+- A companion .pkl stores serializable source/chunk metadata for debugging,
+  rebuild assistance, and notebook-style persistence.
+- We DO NOT pickle the retriever object itself, because LangChain retrievers
+  often contain thread locks (e.g. _thread.RLock) that are not picklable.
 
-Modern upgrades:
-  - FAISS persisted to disk (original kept in-memory only)
-  - Chroma as alternative (richer metadata filtering)
-  - Chunk size tuned from notebook's 1000→800 (better recall)
-  - Chunk overlap: 20→100 (better context preservation)
-  - k=3→6 (notebook used 3, more context improves accuracy)
-  - Saved as FAISS index files (same format as args.retriever_index)
-  - Pickle-compatible retriever save (mirrors args.retrieve_data)
-
-FAISS is kept as PRIMARY because:
-  1. The original notebook used it and achieved ROUGE-1 F1=0.367
-  2. No external service needed (fully local)
-  3. Faster similarity search than Chroma for < 50K chunks
+Saved artifacts:
+  katzbot/faiss_index/
+    ├── index.faiss
+    ├── index.pkl              # LangChain FAISS sidecar created by save_local
+    ├── source_docs.pkl        # serializable cached chunks/docs (ours)
+    └── index_meta.pkl         # build metadata (ours)
 """
 
-import os
-import pickle
-from pathlib import Path
-from typing import Optional
+from __future__ import annotations
 
-# ── Text splitter ─────────────────────────────────────────────
+import pickle
+import time
+from pathlib import Path
+from typing import Any, Dict, List
+
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 except ImportError:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# ── FAISS (primary, same as notebook) ─────────────────────────
 try:
     from langchain_community.vectorstores import FAISS
-    print("[Indexer] Using langchain_community FAISS")
 except ImportError:
     from langchain.vectorstores import FAISS
-    print("[Indexer] Using legacy langchain FAISS")
 
-# ── Chroma (alternative, if FAISS unavailable) ────────────────
-def _get_chroma():
-    try:
-        from langchain_chroma import Chroma
-        return Chroma
-    except ImportError:
-        from langchain_community.vectorstores import Chroma
-        return Chroma
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    from langchain.schema import Document
 
-# ── Constants (mirror original notebook's args) ───────────────
-INDEX_DIR        = Path(__file__).parent / "faiss_index"
-FAISS_DIR        = INDEX_DIR   # alias used by rag_engine.py
-RETRIEVER_PICKLE = Path(__file__).parent / "retriever_store.pkl"
-CHROMA_DIR       = Path(__file__).parent / "chroma_index"
+INDEX_DIR = Path(__file__).parent / "faiss_index"
+FAISS_DIR = INDEX_DIR
+DOCS_PICKLE = INDEX_DIR / "source_docs.pkl"
+INDEX_META_PICKLE = INDEX_DIR / "index_meta.pkl"
 
-# Chunk settings (tuned from notebook's 1000/20)
-CHUNK_SIZE    = 800
+# Backward-compatible alias used by older imports.
+# This is NOT a pickled retriever object.
+RETRIEVER_PICKLE = DOCS_PICKLE
+
+CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
-RETRIEVER_K   = 6    # notebook used 3; 6 gives better context
+RETRIEVER_K = 6
 
 
-def _get_embeddings():
-    """
-    Get embeddings model.
-    Priority:
-      1. OpenAI text-embedding-3-small (if key available) — best quality
-      2. all-MiniLM-L6-v2 via HuggingFace — same as original notebook, free
-    """
-    from llm_config import get_langchain_embeddings
-    return get_langchain_embeddings()
+def _serialize_documents(documents: List[Document]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "page_content": doc.page_content,
+            "metadata": dict(doc.metadata or {}),
+        }
+        for doc in documents
+    ]
 
 
-def split_documents(documents: list) -> list:
-    """
-    Split documents into chunks.
-    Uses RecursiveCharacterTextSplitter — same as notebook but tuned.
-    """
+def _deserialize_documents(payload: List[Dict[str, Any]]) -> List[Document]:
+    docs: List[Document] = []
+    for item in payload:
+        docs.append(
+            Document(
+                page_content=item.get("page_content", ""),
+                metadata=item.get("metadata", {}),
+            )
+        )
+    return docs
+
+
+def _save_pickle(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(obj, f)
+
+
+def _load_pickle(path: Path, default: Any = None) -> Any:
+    if not path.exists():
+        return default
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return default
+
+
+def split_documents(documents: List[Document]) -> List[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
-        length_function=len,
+        separators=["\n\n", "\n", ". ", " ", ""],
     )
     chunks = splitter.split_documents(documents)
-    print(f"[Indexer] Split {len(documents)} docs → {len(chunks)} chunks "
-          f"(size={CHUNK_SIZE}, overlap={CHUNK_OVERLAP})")
+    print(
+        f"[Indexer] {len(documents)} docs → {len(chunks)} chunks "
+        f"(size={CHUNK_SIZE}, overlap={CHUNK_OVERLAP})"
+    )
     return chunks
 
 
-def build_faiss_index(documents: list, force_rebuild: bool = False) -> "FAISS":
-    """
-    Build or load FAISS vector store.
-    
-    Mirrors the notebook's FAISS.from_documents() but adds persistence.
-    Original: db = FAISS.from_documents(docs, embeddings)
-    Now:      saved to faiss_index/ and reloaded on next run.
-    """
-    embeddings = _get_embeddings()
+def save_index_artifacts(source_documents: List[Document], chunk_documents: List[Document], db) -> None:
+    payload = {
+        "source_documents": _serialize_documents(source_documents),
+        "chunk_documents": _serialize_documents(chunk_documents),
+    }
+    meta = {
+        "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "source_doc_count": len(source_documents),
+        "chunk_count": len(chunk_documents),
+        "vector_count": int(getattr(db.index, "ntotal", 0)),
+        "chunk_size": CHUNK_SIZE,
+        "chunk_overlap": CHUNK_OVERLAP,
+        "retriever_k": RETRIEVER_K,
+        "faiss_dir": str(INDEX_DIR),
+        "docs_pickle": str(DOCS_PICKLE),
+    }
+    _save_pickle(DOCS_PICKLE, payload)
+    _save_pickle(INDEX_META_PICKLE, meta)
+    print(f"[Indexer] ✓ Document cache saved → {DOCS_PICKLE}")
+    print(f"[Indexer] ✓ Metadata saved → {INDEX_META_PICKLE}")
 
-    # ── Try loading existing index ─────────────────────────────
+
+def load_index_metadata() -> Dict[str, Any]:
+    return _load_pickle(INDEX_META_PICKLE, default={}) or {}
+
+
+def load_cached_documents(kind: str = "source") -> List[Document]:
+    payload = _load_pickle(DOCS_PICKLE, default={}) or {}
+    if kind == "chunk":
+        return _deserialize_documents(payload.get("chunk_documents", []))
+    return _deserialize_documents(payload.get("source_documents", []))
+
+
+def build_faiss_index(documents: List[Document], force_rebuild: bool = False):
+    """
+    Build or load FAISS index.
+
+    Fast path:
+      - load FAISS from disk in ~seconds
+    Fresh build:
+      - split docs
+      - embed chunks
+      - save FAISS + companion .pkl artifacts
+    """
+    from llm_config import get_langchain_embeddings
+
+    embeddings = get_langchain_embeddings()
+
     if not force_rebuild and INDEX_DIR.exists():
         try:
             db = FAISS.load_local(
@@ -109,107 +161,46 @@ def build_faiss_index(documents: list, force_rebuild: bool = False) -> "FAISS":
                 embeddings,
                 allow_dangerous_deserialization=True,
             )
-            n = db.index.ntotal
+            n = int(db.index.ntotal)
             if n > 0:
-                print(f"[Indexer] Loaded FAISS index ({n} vectors) from {INDEX_DIR}")
+                print(f"[Indexer] ✓ Loaded FAISS ({n:,} vectors) from disk")
+                meta = load_index_metadata()
+                if meta:
+                    print(
+                        f"[Indexer] Cached metadata: {meta.get('source_doc_count', 0)} source docs, "
+                        f"{meta.get('chunk_count', 0)} chunks"
+                    )
                 return db
         except Exception as e:
-            print(f"[Indexer] Could not load existing FAISS index: {e}")
+            print(f"[Indexer] Could not load existing index: {e}")
 
-    # ── Build fresh ────────────────────────────────────────────
-    print(f"[Indexer] Building FAISS index from {len(documents)} documents...")
+    print(f"[Indexer] Building FAISS from {len(documents)} docs…")
     chunks = split_documents(documents)
-
-    print(f"[Indexer] Creating embeddings for {len(chunks)} chunks...")
+    print(f"[Indexer] Embedding {len(chunks)} chunks…")
     db = FAISS.from_documents(chunks, embeddings)
 
-    # ── Persist (notebook didn't persist — we add this) ───────
     try:
         INDEX_DIR.mkdir(parents=True, exist_ok=True)
         db.save_local(str(INDEX_DIR))
-        print(f"[Indexer] FAISS index saved → {INDEX_DIR}")
+        save_index_artifacts(documents, chunks, db)
+        print(f"[Indexer] ✓ FAISS index saved → {INDEX_DIR}")
     except Exception as e:
-        print(f"[Indexer] FAISS save failed: {e}")
-
-    # ── Also save retriever as pickle (mirrors args.retrieve_data) ─
-    try:
-        retriever = db.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": RETRIEVER_K},
-        )
-        with open(RETRIEVER_PICKLE, "wb") as f:
-            pickle.dump(retriever, f)
-        print(f"[Indexer] Retriever saved → {RETRIEVER_PICKLE}")
-    except Exception as e:
-        print(f"[Indexer] Retriever pickle failed: {e}")
+        print(f"[Indexer] Save failed: {e}")
 
     return db
 
 
-def build_chroma_index(documents: list, force_rebuild: bool = False):
-    """
-    Alternative: Chroma vector store (richer metadata, persistent by default).
-    Used as fallback if FAISS has issues.
-    """
-    Chroma = _get_chroma()
-    embeddings = _get_embeddings()
-
-    if not force_rebuild and CHROMA_DIR.exists():
-        try:
-            db = Chroma(
-                persist_directory=str(CHROMA_DIR),
-                embedding_function=embeddings,
-            )
-            count = db._collection.count()
-            if count > 0:
-                print(f"[Indexer] Loaded Chroma index ({count} chunks)")
-                return db
-        except Exception as e:
-            print(f"[Indexer] Chroma load failed: {e}")
-
-    print("[Indexer] Building Chroma index...")
-    chunks = split_documents(documents)
-    CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-    db = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=str(CHROMA_DIR),
-    )
-    if hasattr(db, "persist"):
-        db.persist()
-    print(f"[Indexer] Chroma index saved → {CHROMA_DIR}")
-    return db
-
-
-def get_retriever(db, search_type: str = "mmr") -> object:
-    """
-    Create retriever from vector store.
-    
-    search_type options:
-      "similarity" — same as original notebook (cosine sim)
-      "mmr"        — Maximum Marginal Relevance (more diverse results, better answers)
-    """
+def get_retriever(db, search_type: str = "mmr"):
     if search_type == "mmr":
         return db.as_retriever(
             search_type="mmr",
             search_kwargs={
-                "k":        RETRIEVER_K,
-                "fetch_k":  RETRIEVER_K * 3,   # fetch more, rerank for diversity
-                "lambda_mult": 0.7,            # balance relevance vs diversity
+                "k": RETRIEVER_K,
+                "fetch_k": RETRIEVER_K * 3,
+                "lambda_mult": 0.7,
             },
         )
     return db.as_retriever(
         search_type="similarity",
         search_kwargs={"k": RETRIEVER_K},
     )
-
-
-if __name__ == "__main__":
-    from crawler import crawl_katz
-    docs = crawl_katz()
-    db   = build_faiss_index(docs, force_rebuild=True)
-    ret  = get_retriever(db)
-    results = ret.invoke("What programs does Katz School offer?")
-    print(f"\nTest query returned {len(results)} chunks:")
-    for r in results[:2]:
-        print(f"  [{r.metadata.get('source','')}] {r.page_content[:150]}...")

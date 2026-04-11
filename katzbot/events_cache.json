@@ -1,0 +1,152 @@
+[
+  {
+    "title": "All Events",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "All Events To view all University sponsored events Click here All Events",
+    "url": "https://www.yu.edu/events/all",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Student Events",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "Student Events To view student\u00a0events such as orientation, chagigahs, and student council sponsored club activities Click Here Student Events",
+    "url": "https://www.yu.edu/events/student",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Torah Events",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "Torah Events To view Torah-related events such as shiurim and minyanim Read More Torah Events",
+    "url": "https://www.yu.edu/events/student/torah",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Additional Calendars",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "Additional Calendars To\u00a0view all other\u00a0university calendars Click here Additional Calendars Academic Calendar Athletics Calendar Featured Events Calendar Care Caf\u00e9 Calendar Provost Calendar Revel Calendar UTS Calendar Wurzweiler Calendar",
+    "url": "https://www.yu.edu/registrar/ug-calendar",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "25Live Scheduling System",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "25Live Scheduling System Information about our event scheduling system. Learn More & Request an Account 25 live is used to schedule every meeting and event held on the Wilf, Beren, and Cardozo campuses as well as any virtual and off-campus university-sponsored event. Submitting an event request thro",
+    "url": "https://www.youtube.com/watch?v=CsiKoNZsgIs",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Event Marketing",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "Event Marketing Promoting & branding your event Learn More Begin the event marketing process with the Marketing and Enrollment Department by completing the project request form. Requests include images for campus flatscreens, invitations (both digital and print), photography, videography, IModules e",
+    "url": "https://www.yu.edu/marketing/request",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Step-By-Step Guide to Event Planning",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "Step-By-Step Guide to Event Planning How to plan in-person events Learn More Plan Ahead View the University Events Calendar prior to requesting your event to avoid conflicts with other University Events. Alternatively, email events@yu.edu when conceptualizing a large event for date recommendations. ",
+    "url": "https://www.yu.edu/events/",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Catering for your events",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "Catering for your events Catertrax Read more Whether planning a simple breakfast or an upscale executive luncheon, you will find our most popular menu selections on the Catertrax system. We can also custom design a menu for special occasions. We pride ourselves on our ability to meet any need with s",
+    "url": "https://www.yu.edu/dining/catering",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Audio Visual & Multimedia Support",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "Audio Visual & Multimedia Support Need audio/visual support equipment for your event? Read More ITS provides a stable and reliable environment for academic instructional programs and administrative departments in multimedia enhanced rooms. This support is limited to computer-related multimedia event",
+    "url": "https://yuad.sharepoint.com/sites/ITSPortal/SitePages/Multimedia.aspx",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Event Parking Requests",
+    "date": "",
+    "time": "",
+    "location": "Yeshiva University",
+    "description": "Event Parking Requests Apply for event parking permits Read more Please fill out and submit the application form linked below to apply for an event parking permit. Please notify parking@yu.edu with any adjustments or special needs that you require for your event. For more information about parking f",
+    "url": "https://www.yu.edumailto:parking@yu.edu",
+    "category": "Katz School",
+    "type": "event"
+  },
+  {
+    "title": "Katz School CS & AI Club Ideathon 2026",
+    "date": "April 13, 2026",
+    "time": "11:45 AM EDT",
+    "location": "Online (Devpost)",
+    "description": "Innovation challenge for Katz School students and faculty. Sponsored by Google Developers Group. Judge: Prof. Honggang Wang.",
+    "url": "https://katz-ideathon-2026.devpost.com",
+    "category": "CS & AI Club",
+    "type": "competition"
+  },
+  {
+    "title": "Katz School Research Symposium 2025",
+    "date": "Spring 2025",
+    "time": "TBD",
+    "location": "Yeshiva University, New York",
+    "description": "Annual symposium showcasing research across AI, CS, Cybersecurity, Data Analytics, and Health Sciences.",
+    "url": "https://www.yu.edu/katz/research-symposium-2025",
+    "category": "Research",
+    "type": "symposium"
+  },
+  {
+    "title": "Katz School Admissions Information Sessions",
+    "date": "Rolling \u2014 check website",
+    "time": "Various",
+    "location": "Online and In-Person",
+    "description": "Meet faculty and current students for all Katz programs. Register at yu.edu/katz/info-sessions.",
+    "url": "https://www.yu.edu/katz/info-sessions",
+    "category": "Admissions",
+    "type": "info_session"
+  },
+  {
+    "title": "YU Graduate School Networking Events",
+    "date": "See yu.edu/graduate/events",
+    "time": "Various",
+    "location": "Yeshiva University",
+    "description": "Networking nights, career fairs, research presentations, and faculty talks for graduate students.",
+    "url": "https://www.yu.edu/graduate/events",
+    "category": "Graduate School",
+    "type": "networking"
+  },
+  {
+    "title": "Katz School Clubs & Organizations Meetings",
+    "date": "Weekly during semester",
+    "time": "Various",
+    "location": "Katz School Campus",
+    "description": "CS & AI Club, Cybersecurity Club, Data Science Society, and other student organizations. See yu.edu/katz/clubs.",
+    "url": "https://www.yu.edu/katz/clubs",
+    "category": "Student Life",
+    "type": "club"
+  }
+]

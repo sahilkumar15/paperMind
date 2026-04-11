@@ -1,47 +1,51 @@
 """
 katzbot/chain.py
 =================
-Conversational RAG chain. Works with Groq, OpenAI, or HuggingFace.
-Uses a simple callable class pattern — no LangChain version issues.
+Conversational RAG chain — callable class pattern.
+Works with any LangChain version (0.1 through 0.3+).
+
+This version is fully offline-safe:
+- Uses Groq/OpenAI only when provider/model/key are valid
+- Uses local HuggingFace only if available
+- Falls back to a deterministic extractive answerer with no API and no model download
+
+So build_index.py and KatzBot chat keep working even with:
+- no Groq/OpenAI key
+- invalid model/provider combination
+- blocked HuggingFace download
+- no local generation model installed
 """
 
-from typing import Optional
+import os
+import re
+from collections import Counter
 
-# ── Prompts (version-safe) ────────────────────────────────────
 try:
     from langchain_core.prompts import PromptTemplate
 except ImportError:
     from langchain.prompts import PromptTemplate
-
-# ── Output parser ─────────────────────────────────────────────
-try:
-    from langchain_core.output_parsers import StrOutputParser
-    _HAS_PARSER = True
-except ImportError:
-    _HAS_PARSER = False
-
-# ── Runnables for LCEL ────────────────────────────────────────
-try:
-    from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-    _HAS_LCEL = True
-except ImportError:
-    _HAS_LCEL = False
 
 
 RAG_PROMPT = """\
 You are KatzBot, the official AI assistant for the Yeshiva University \
 Katz School of Science and Health.
 
-Answer the question using ONLY the context below from the Katz School website.
-- Be specific and helpful — include emails, URLs, deadlines when available
-- If the answer is not in the context, say exactly:
-  "I don't have that specific information. Please check yu.edu/katz or email katz@yu.edu"
-- Keep answers to 2-5 sentences
+Answer the question using ONLY the context below (from the Katz School \
+website, faculty database, events, and QA knowledge base).
+
+Guidelines:
+- Be specific and helpful. Include faculty emails, program URLs, deadlines.
+- For faculty questions: always include name, title, email, and expertise.
+- If the answer is NOT in the context, say:
+  "I don't have that specific information. Please check yu.edu/katz \
+  or email katz@yu.edu"
+- Never invent information not present in the context.
+- Keep answers 2-5 sentences unless more detail is needed.
 
 Context:
 {context}
 
-Conversation so far:
+Conversation history:
 {history}
 
 Question: {question}
@@ -49,133 +53,331 @@ Question: {question}
 Answer:"""
 
 
+STOPWORDS = {
+    "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "at",
+    "is", "are", "was", "were", "be", "been", "being", "what", "who", "how", "when",
+    "where", "which", "that", "this", "it", "as", "by", "from", "about", "into",
+    "does", "do", "did", "can", "i", "me", "my", "we", "you", "your", "our",
+    "school", "katz", "yeshiva", "university"
+}
+
+
 def _format_docs(docs: list) -> str:
-    """Turn retrieved docs into a context string."""
     if not docs:
         return "No relevant information found."
     parts = []
     for doc in docs:
-        src   = doc.metadata.get("source", "")
+        src = doc.metadata.get("source", "")
         title = doc.metadata.get("title", "") or src.split("/")[-1]
         parts.append(f"[{title}]\n{doc.page_content}")
     return "\n\n---\n\n".join(parts)
 
 
 def _format_history(history: list) -> str:
-    """Format chat history to string."""
     if not history:
         return "No previous conversation."
     lines = []
-    for msg in history[-6:]:   # last 3 turns only
-        role    = "User" if msg.get("role") == "user" else "KatzBot"
-        content = str(msg.get("content", ""))[:300]
+    for msg in history[-6:]:
+        role = "User" if msg.get("role") == "user" else "KatzBot"
+        content = str(msg.get("content", ""))[:400]
         lines.append(f"{role}: {content}")
     return "\n".join(lines)
 
 
-def get_llm(temperature: float = 0.2):
-    """
-    Get LLM — Groq (free) preferred, HuggingFace pipeline as fallback.
-    Mirrors the notebook's HuggingFace approach but uses API instead of local model.
-    """
+def _want_local_only() -> bool:
+    return os.getenv("KATZBOT_LOCAL_ONLY", "0").strip().lower() in {
+        "1", "true", "yes", "y", "on"
+    }
+
+
+def _provider_config_is_valid() -> tuple[bool, str]:
     try:
-        from llm_config import get_langchain_llm
-        llm = get_langchain_llm(temperature=temperature)
-        print(f"[Chain] LLM: {type(llm).__name__}")
-        return llm
+        from llm_config import (
+            get_provider,
+            get_model_name,
+            is_api_key_set,
+            GROQ_MODELS,
+            OPENAI_MODELS,
+        )
+
+        provider = get_provider()
+        model = get_model_name()
+
+        if provider == "groq":
+            if model not in GROQ_MODELS:
+                return False, (
+                    f"MODEL_NAME='{model}' is not a valid Groq model. "
+                    f"Pick one of: {', '.join(GROQ_MODELS.keys())}"
+                )
+        elif provider == "openai":
+            if model not in OPENAI_MODELS:
+                return False, (
+                    f"MODEL_NAME='{model}' is not a supported OpenAI model. "
+                    f"Pick one of: {', '.join(OPENAI_MODELS.keys())}"
+                )
+        else:
+            return False, f"Unsupported provider '{provider}'"
+
+        if not is_api_key_set():
+            return False, f"Missing/invalid API key for provider '{provider}'"
+
+        return True, f"provider={provider} model={model}"
     except Exception as e:
-        print(f"[Chain] llm_config failed ({e}), trying HuggingFace pipeline...")
+        return False, f"llm_config validation failed: {e}"
+
+
+def _tokenize(text: str) -> list[str]:
+    toks = re.findall(r"[a-zA-Z][a-zA-Z0-9+.-]*", text.lower())
+    return [t for t in toks if t not in STOPWORDS and len(t) > 2]
+
+
+def _clean_sentence(s: str) -> str:
+    s = re.sub(r"\s+", " ", s).strip(" -•\n\t")
+    return s
+
+
+def _split_sentences(text: str) -> list[str]:
+    text = text.replace("\r", " ")
+    raw = re.split(r"(?<=[.!?])\s+|\n+", text)
+    out = []
+    seen = set()
+    for s in raw:
+        s = _clean_sentence(s)
+        if len(s) < 25:
+            continue
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def _extract_faculty_answer(context: str, question: str) -> str | None:
+    q = question.lower()
+    if not any(x in q for x in ["prof", "professor", "faculty", "contact", "who is"]):
+        return None
+
+    blocks = re.split(r"\n\n---\n\n", context)
+    candidates = []
+    for block in blocks:
+        if "FACULTY PROFILE" not in block and "honggang wang" not in block.lower():
+            continue
+        score = 0
+        for tok in _tokenize(question):
+            if tok in block.lower():
+                score += 2
+        if score <= 0:
+            continue
+
+        name = re.search(r"Name:\s*(.+)", block)
+        title = re.search(r"Title:\s*(.+)", block)
+        email = re.search(r"Email:\s*(.+)", block)
+        exp = re.search(r"Research Expertise:\s*(.+)", block)
+        note = re.search(r"About:\s*(.+)", block)
+
+        parts = []
+        if name:
+            parts.append(name.group(1).strip())
+        if title:
+            parts.append(title.group(1).strip())
+        if email:
+            parts.append(f"Email: {email.group(1).strip()}")
+        if exp:
+            exp_text = exp.group(1).strip()
+            exp_items = [e.strip() for e in exp_text.split(",")[:5] if e.strip()]
+            if exp_items:
+                parts.append("Expertise: " + ", ".join(exp_items))
+        if note:
+            parts.append(note.group(1).strip())
+
+        if parts:
+            candidates.append((score, " ".join(parts)))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
+def _best_sentences(context: str, question: str, k: int = 4) -> list[str]:
+    q_tokens = _tokenize(question)
+    q_counts = Counter(q_tokens)
+    sents = _split_sentences(context)
+    scored = []
+    for sent in sents:
+        s_low = sent.lower()
+        s_tokens = _tokenize(sent)
+        if not s_tokens:
+            continue
+        overlap = sum(q_counts[t] for t in s_tokens if t in q_counts)
+        bonus = 0
+        if "http" in s_low or "yu.edu" in s_low:
+            bonus += 1
+        if any(x in s_low for x in ["email:", "deadline", "tuition", "credits", "curriculum", "contact", "apply"]):
+            bonus += 1
+        score = overlap + bonus
+        if score > 0:
+            scored.append((score, sent))
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    out = []
+    seen = set()
+    for _, sent in scored:
+        norm = sent.lower()
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(sent)
+        if len(out) >= k:
+            break
+    return out
+
+
+class ExtractiveFallbackLLM:
+    def __init__(self):
+        self._katzbot_local = True
+        self._katzbot_extractive = True
+
+    def invoke(self, filled_prompt: str):
+        context_match = re.search(
+            r"Context:\n(.*?)\n\nConversation history:\n",
+            filled_prompt,
+            flags=re.DOTALL,
+        )
+        question_match = re.search(r"Question:\s*(.*?)\n\nAnswer:", filled_prompt, flags=re.DOTALL)
+        context = context_match.group(1).strip() if context_match else ""
+        question = question_match.group(1).strip() if question_match else ""
+
+        if not context or context == "No relevant information found.":
+            return "I don't have that specific information. Please check yu.edu/katz or email katz@yu.edu"
+
+        faculty = _extract_faculty_answer(context, question)
+        if faculty:
+            return faculty
+
+        top = _best_sentences(context, question, k=4)
+        if not top:
+            return "I don't have that specific information. Please check yu.edu/katz or email katz@yu.edu"
+
+        answer = " ".join(top)
+        answer = re.sub(r"\s+", " ", answer).strip()
+        return answer[:1200]
+
+
+def get_llm(temperature: float = 0.2):
+    if _want_local_only():
+        print("[Chain] KATZBOT_LOCAL_ONLY=1 → local/offline mode enabled")
+        try:
+            return _get_hf_llm()
+        except Exception as e:
+            print(f"[Chain] Local HuggingFace unavailable ({e}) → using extractive fallback")
+            return ExtractiveFallbackLLM()
+
+    ok, reason = _provider_config_is_valid()
+    if ok:
+        try:
+            from llm_config import get_langchain_llm
+            llm = get_langchain_llm(temperature=temperature)
+            print(f"[Chain] LLM: {type(llm).__name__}")
+            return llm
+        except Exception as e:
+            print(f"[Chain] API LLM setup failed ({e})")
+    else:
+        print(f"[Chain] API LLM disabled ({reason})")
+
+    try:
         return _get_hf_llm()
+    except Exception as e:
+        print(f"[Chain] Local HuggingFace unavailable ({e}) → using extractive fallback")
+        return ExtractiveFallbackLLM()
 
 
 def _get_hf_llm():
-    """HuggingFace pipeline fallback — same spirit as notebook's Zephyr-7B but CPU-friendly."""
+    from transformers import pipeline as hf_pipeline
     try:
-        from transformers import pipeline as hf_pipeline
-        try:
-            from langchain_community.llms import HuggingFacePipeline
-        except ImportError:
-            from langchain.llms import HuggingFacePipeline
+        from langchain_community.llms import HuggingFacePipeline
+    except ImportError:
+        from langchain.llms import HuggingFacePipeline
 
-        print("[Chain] Loading HuggingFace phi-2 (CPU, ~5GB)...")
-        pipe = hf_pipeline(
-            "text-generation",
-            model="microsoft/phi-2",
-            max_new_tokens=512,
-            temperature=0.2,
-            do_sample=True,
-            repetition_penalty=1.1,
-            return_full_text=False,
-        )
-        return HuggingFacePipeline(pipeline=pipe)
-    except Exception as e:
-        raise RuntimeError(
-            f"No LLM available. Set GROQ_API_KEY in .env or install transformers. Error: {e}"
-        )
+    model_name = os.getenv("KATZBOT_LOCAL_MODEL", "google/flan-t5-base")
+    local_files_only = os.getenv("KATZBOT_HF_LOCAL_FILES_ONLY", "1").strip().lower() in {
+        "1", "true", "yes", "y", "on"
+    }
+    print(
+        f"[Chain] Loading local HuggingFace model: {model_name} "
+        f"(local_files_only={local_files_only})"
+    )
+
+    task = "text2text-generation" if "t5" in model_name.lower() else "text-generation"
+    pipe = hf_pipeline(
+        task,
+        model=model_name,
+        tokenizer=model_name,
+        max_new_tokens=256,
+        temperature=0.2,
+        do_sample=True,
+        local_files_only=local_files_only,
+    )
+    llm = HuggingFacePipeline(pipeline=pipe)
+    setattr(llm, "_katzbot_local", True)
+    return llm
 
 
-class ConversationalRAGChain:
-    """
-    Simple callable RAG chain with conversation memory.
-    Avoids all LangChain version compatibility issues by being explicit.
-    
-    Call like: result = chain({"question": "...", "history": [...]})
-    """
-
+class KatzRAGChain:
     def __init__(self, retriever, llm):
         self.retriever = retriever
-        self.llm       = llm
-        self.prompt    = PromptTemplate(
+        self.llm = llm
+        self.prompt = PromptTemplate(
             input_variables=["context", "history", "question"],
             template=RAG_PROMPT,
         )
 
+    def _invoke_with_local_retry(self, filled: str):
+        try:
+            response = self.llm.invoke(filled)
+            return response.content if hasattr(response, "content") else str(response)
+        except Exception as e:
+            if getattr(self.llm, "_katzbot_extractive", False):
+                raise
+            print(f"[Chain] Current LLM failed ({e}) → retrying with extractive fallback")
+            self.llm = ExtractiveFallbackLLM()
+            response = self.llm.invoke(filled)
+            return response.content if hasattr(response, "content") else str(response)
+
     def __call__(self, inputs: dict) -> dict:
         question = inputs.get("question", "")
-        history  = inputs.get("history", [])
+        history = inputs.get("history", [])
 
-        # Step 1: Retrieve relevant documents
         try:
             docs = self.retriever.invoke(question)
-        except Exception:
-            # Older LangChain uses .get_relevant_documents()
+        except AttributeError:
             try:
                 docs = self.retriever.get_relevant_documents(question)
             except Exception as e:
                 docs = []
-                print(f"[Chain] Retrieval failed: {e}")
+                print(f"[Chain] Retrieval error: {e}")
 
-        # Step 2: Format context and history
-        context      = _format_docs(docs)
-        history_str  = _format_history(history)
-
-        # Step 3: Fill prompt
+        context = _format_docs(docs)
+        history_str = _format_history(history)
         filled = self.prompt.format(
             context=context,
             history=history_str,
             question=question,
         )
 
-        # Step 4: Call LLM
         try:
-            response = self.llm.invoke(filled)
-            # Handle both string and AIMessage responses
-            if hasattr(response, "content"):
-                answer = response.content
-            else:
-                answer = str(response)
+            answer = self._invoke_with_local_retry(filled)
         except Exception as e:
             answer = f"Error generating answer: {e}"
 
         return {
-            "answer":  answer.strip(),
+            "answer": str(answer).strip(),
             "sources": [d.metadata.get("source", "") for d in docs],
-            "docs":    docs,
+            "docs": docs,
         }
 
 
-def build_conversational_chain(retriever, llm) -> ConversationalRAGChain:
-    """Factory function — returns a ready-to-call chain."""
-    chain = ConversationalRAGChain(retriever, llm)
-    print("[Chain] Conversational RAG chain ready")
+def build_chain(retriever, llm) -> KatzRAGChain:
+    chain = KatzRAGChain(retriever, llm)
+    print("[Chain] RAG chain ready")
     return chain

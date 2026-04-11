@@ -1,18 +1,22 @@
 """
-app.py — PaperMind + KatzBot  |  Yeshiva University Katz School
-=================================================================
-Tabs:
-  1. ⚡ Run Agents       — 6-agent research pipeline
-  2. 📄 Papers Found     — Semantic Scholar results
-  3. 🗺️ Relationship Map — agreements / contradictions
-  4. 🎯 Research Gaps    — unexplored opportunities
-  5. ✍️ Lit Review Draft — ready-to-paste literature review
-  6. 📅 Study Plan       — day-by-day reading schedule
-  7. 💬 PaperBot         — research Q&A (paper context)
-  8. 🎓 KatzBot          — RAG chatbot over yu.edu/katz
-  9. 👨‍🏫 Faculty Match    — find the right Katz professor
+app.py — KatzScholarMind: Research Intelligence Platform
+======================================================
+Yeshiva University · Katz School of Science and Health
+Katz School CS & AI Club Ideathon 2026
 
-Run:  streamlit run app.py
+Tabs:
+  1.  ⚡ Run Agents       — 6-agent research pipeline
+  2.  📄 Papers Found     — Crawler output
+  3.  🗺️ Relationship Map  — Agreements & contradictions
+  4.  🎯 Research Gaps    — Unexplored opportunities
+  5.  ✍️ Lit Review Draft  — Auto-generated academic text
+  6.  📅 Study Plan       — Day-by-day reading schedule
+  7.  💬 PaperBot         — Direct AI chat
+  8.  🎓 KatzBot          — Katz School RAG assistant
+  9.  📅 Katz Events      — Live campus events
+  10. 🧠 Smart Advisor    — Faculty + event recommendations
+  11. 📚 Citations (.bib) — Verified BibTeX for Overleaf
+  12. 👨‍🏫 Faculty Match    — Find the right professor
 """
 
 import os
@@ -21,241 +25,160 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ── Page config ───────────────────────────────────────────────
 st.set_page_config(
-    page_title="PaperMind — Katz School AI",
+    page_title="KatzScholarMind",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── CSS ───────────────────────────────────────────────────────
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-html,body,[class*="css"]{font-family:'DM Sans',sans-serif}
-:root{--ink:#0D1117;--ink2:#161B22;--border:#30363D;--muted:#8B949E;--text:#E6EDF3;--accent:#58A6FF;--gold:#D29922;--green:#3FB950;--red:#F85149;--purple:#BC8CFF}
-.stApp{background:#0D1117;color:#E6EDF3}
-section[data-testid="stSidebar"]{background:#161B22!important;border-right:1px solid #30363D}
-section[data-testid="stSidebar"] *{color:#E6EDF3!important}
-.pm-header{padding:2.5rem 0 2rem;border-bottom:1px solid #30363D;margin-bottom:2rem}
-.pm-eyebrow{font-family:'JetBrains Mono',monospace;font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:#58A6FF;margin-bottom:.6rem}
-.pm-title{font-family:'DM Serif Display',serif;font-size:2.8rem;color:#E6EDF3;line-height:1.1;margin:0 0 .5rem}
-.pm-title em{color:#58A6FF;font-style:italic}
-.pm-sub{font-size:1rem;color:#8B949E;font-weight:300;max-width:600px;line-height:1.6}
-.agent-pipeline{display:flex;flex-direction:column;gap:6px;margin:1rem 0}
-.agent-row{display:flex;align-items:center;gap:12px;background:#161B22;border:1px solid #30363D;border-radius:8px;padding:10px 14px;transition:border-color .2s}
-.agent-row.active{border-color:#D29922;background:#1C1A10}
-.agent-row.done{border-color:#3FB950;background:#0D1F12}
-.agent-row.waiting{opacity:.55}
-.agent-num{font-family:'JetBrains Mono',monospace;font-size:.7rem;color:#8B949E;min-width:20px}
-.agent-name{font-size:.88rem;font-weight:500;color:#E6EDF3}
-.agent-desc{font-size:.78rem;color:#8B949E;margin-left:auto}
-.dot{width:8px;height:8px;border-radius:50%;background:#30363D;flex-shrink:0}
-.dot.active{background:#D29922;animation:pulse 1s infinite}
-.dot.done{background:#3FB950}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.stats-row{display:flex;gap:8px;flex-wrap:wrap;margin:1.2rem 0}
-.stat-chip{background:#161B22;border:1px solid #30363D;border-radius:20px;padding:4px 14px;font-size:.82rem;color:#8B949E;font-family:'JetBrains Mono',monospace}
-.stat-chip b{color:#E6EDF3}
-.stTabs [data-baseweb="tab-list"]{background:#161B22;border-bottom:1px solid #30363D;gap:0;padding:0}
-.stTabs [data-baseweb="tab"]{font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:500;color:#8B949E;padding:.7rem 1.1rem;border-bottom:2px solid transparent;border-radius:0}
-.stTabs [aria-selected="true"]{color:#58A6FF!important;border-bottom:2px solid #58A6FF!important;background:transparent!important}
-.content-card{background:#161B22;border:1px solid #30363D;border-radius:10px;padding:1.4rem 1.6rem;margin:.8rem 0}
-.card-label{font-family:'JetBrains Mono',monospace;font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:#8B949E;margin-bottom:.5rem}
-.stButton>button{background:#1F6FEB!important;color:white!important;border:none!important;border-radius:6px!important;font-family:'DM Sans',sans-serif!important;font-weight:500!important;font-size:.88rem!important;padding:.55rem 1.8rem!important;transition:background .2s!important}
-.stButton>button:hover{background:#388BFD!important}
-.stButton>button:disabled{background:#21262D!important;color:#484F58!important}
-.bubble-user{background:#1F6FEB;color:white;border-radius:14px 14px 3px 14px;padding:.65rem 1rem;margin:.4rem 0 .4rem 3.5rem;font-size:.9rem;line-height:1.55}
-.bubble-bot{background:#1C2128;border:1px solid #30363D;color:#E6EDF3;border-radius:14px 14px 14px 3px;padding:.65rem 1rem;margin:.4rem 3.5rem .4rem 0;font-size:.9rem;line-height:1.55}
-.chat-who{font-size:.7rem;font-family:'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8B949E;margin:.8rem 0 .2rem}
-.stTextInput input,.stTextArea textarea{background:#161B22!important;border:1px solid #30363D!important;color:#E6EDF3!important;border-radius:6px!important}
-.stTextInput input:focus,.stTextArea textarea:focus{border-color:#58A6FF!important;box-shadow:none!important}
-label{color:#8B949E!important;font-size:.82rem!important}
-/* Faculty cards */
-.fac-card{background:#161B22;border:1px solid #30363D;border-left:4px solid #58A6FF;border-radius:0 8px 8px 0;padding:1rem 1.2rem;margin-bottom:.8rem}
-.fac-name{font-size:1rem;font-weight:600;color:#E6EDF3;margin-bottom:.2rem}
-.fac-title{font-size:.78rem;color:#8B949E;margin-bottom:.4rem}
-.fac-dept{font-size:.72rem;font-family:'JetBrains Mono',monospace;color:#58A6FF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.5rem}
-.fac-expertise{font-size:.82rem;color:#C9D1D9;line-height:1.5;margin-bottom:.5rem}
-.fac-contact a{font-size:.82rem;color:#58A6FF;text-decoration:none}
-.fac-contact a:hover{text-decoration:underline}
-.fac-note{font-size:.75rem;color:#8B949E;font-style:italic;margin-top:.3rem}
-/* KatzBot source pills */
-.source-pill{display:inline-block;background:#161B22;border:1px solid #30363D;border-radius:20px;padding:2px 10px;font-size:.72rem;color:#8B949E;margin:2px;font-family:'JetBrains Mono',monospace}
-.stMarkdown h1,h2,h3{color:#E6EDF3;font-family:'DM Serif Display',serif}
-.stMarkdown p{color:#C9D1D9;line-height:1.7}
-.stMarkdown li{color:#C9D1D9}
-.stMarkdown code{background:#1C2128;color:#79C0FF;border-radius:4px;padding:1px 5px}
-</style>
-""", unsafe_allow_html=True)
-
-
 # ── Session state ─────────────────────────────────────────────
-for k, v in {
-    "results": None,
-    "running": False,
-    "chat": [],            # PaperBot chat
-    "katz_chat": [],       # KatzBot chat
-    "topic": "",
-    "katzbot_ready": False,
-    "citations": [],
-    "bib_file": "",
-    "bib_saved": "",
-}.items():
+DEFAULTS = {
+    "results":      None,
+    "topic":        "",
+    "katz_chat":    [],
+    "katzbot_ready":False,
+    "citations":    [],
+    "bib_file":     "",
+    "bib_saved":    "",
+    "events":       [],
+    "smart_advice": None,
+    "paperbot_chat":[],
+}
+for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 
+# ── Helper functions (must be defined before use) ────────────
+def _build_md_output(results: dict, topic: str) -> str:
+    """Build a markdown export of all agent outputs."""
+    md = f"# KatzScholarMind Output\n## Topic: {topic}\n\n"
+    for key, label in [
+        ("papers",     "Papers Found"),
+        ("map",        "Relationship Map"),
+        ("gaps",       "Research Gaps"),
+        ("lit_review", "Literature Review"),
+        ("study_plan", "Study Plan"),
+    ]:
+        val = results.get(key, "")
+        if val:
+            md += f"## {label}\n\n{val}\n\n---\n\n"
+    return md
+
 # ── Sidebar ───────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🔬 PaperMind")
-    st.markdown(
-        "<span style='font-size:.75rem;color:#8B949E;font-family:monospace'>"
-        "Katz School · Ideathon 2026</span>", unsafe_allow_html=True,
-    )
+    st.markdown("## 🔬 KatzScholarMind")
+    st.caption("Katz School · Ideathon 2026")
     st.markdown("---")
 
-    # ── LLM Provider selector ─────────────────────────────────
-    st.markdown("#### 🤖 AI Provider")
+    # AI Provider
+    st.markdown("#### ⚙️ AI Provider")
     provider_choice = st.radio(
-        "provider",
-        ["Groq (Free)", "OpenAI (Paid)"],
-        index=0 if os.getenv("LLM_PROVIDER", "groq").lower() == "groq" else 1,
-        label_visibility="collapsed",
-        horizontal=True,
+        "Provider", ["Groq (Free)", "OpenAI (Paid)"],
+        horizontal=True, label_visibility="collapsed",
+        key="provider_radio",
     )
-    is_groq = provider_choice == "Groq (Free)"
+    provider = "groq" if "Groq" in provider_choice else "openai"
+    os.environ["LLM_PROVIDER"] = provider
 
-    from llm_config import get_provider_display, is_api_key_set
-    pinfo = get_provider_display()
+    from llm_config import (GROQ_MODELS, OPENAI_MODELS,
+                             is_api_key_set, get_api_key)
 
-    # Show appropriate key status
-    groq_key  = os.getenv("GROQ_API_KEY",  "")
-    openai_key = os.getenv("OPENAI_API_KEY", "")
-    groq_ok   = bool(groq_key  and groq_key.startswith("gsk_"))
-    openai_ok = bool(openai_key and openai_key.startswith("sk-"))
-
-    if is_groq:
-        if groq_ok:
-            st.markdown(
-                "<span style='color:#3FB950;font-size:.8rem'>● Groq API key loaded ✓</span>",
-                unsafe_allow_html=True,
-            )
+    if provider == "groq":
+        groq_key = os.getenv("GROQ_API_KEY","")
+        if groq_key and groq_key.startswith("gsk_"):
+            st.markdown("● Groq API key loaded ✓")
         else:
-            st.markdown(
-                "<span style='color:#F85149;font-size:.8rem'>● Add GROQ_API_KEY to .env</span>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                "<span style='color:#8B949E;font-size:.75rem'>"
-                "Free key → console.groq.com</span>",
-                unsafe_allow_html=True,
-            )
-        # Show model choices for Groq (production models, April 2026)
-        groq_model = st.selectbox(
-            "Groq model",
-            [
-                "llama-3.3-70b-versatile",                  # best quality
-                "llama-3.1-8b-instant",                     # fastest
-                "openai/gpt-oss-120b",                      # GPT-class 120B
-                "openai/gpt-oss-20b",                       # GPT-class fast
-                "meta-llama/llama-4-scout-17b-16e-instruct", # Llama 4
-                "qwen/qwen3-32b",                            # Qwen reasoning
-            ],
-            index=0,
-            label_visibility="collapsed",
-        )
-        groq_descriptions = {
-            "llama-3.3-70b-versatile":                   "⭐ Best quality · 300K TPM · recommended",
-            "llama-3.1-8b-instant":                      "⚡ Fastest · 250K TPM · 14,400 req/day",
-            "openai/gpt-oss-120b":                       "🔥 GPT-class 120B · 250K TPM",
-            "openai/gpt-oss-20b":                        "🚀 GPT-class · 1000 t/s · fastest",
-            "meta-llama/llama-4-scout-17b-16e-instruct": "🦙 Llama 4 Scout · vision support",
-            "qwen/qwen3-32b":                            "🧠 Qwen3 32B · strong reasoning",
-        }
-        st.markdown(
-            f"<span style='color:#8B949E;font-size:.75rem'>"
-            f"{groq_descriptions.get(groq_model, groq_model)}</span>",
-            unsafe_allow_html=True,
-        )
-    else:
-        if openai_ok:
-            st.markdown(
-                "<span style='color:#3FB950;font-size:.8rem'>● OpenAI API key loaded ✓</span>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                "<span style='color:#F85149;font-size:.8rem'>● Add OPENAI_API_KEY to .env</span>",
-                unsafe_allow_html=True,
-            )
-        openai_model = st.selectbox(
-            "OpenAI model",
-            ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
-            index=0,
-            label_visibility="collapsed",
-        )
+            st.warning("Set GROQ_API_KEY in .env")
+            groq_key = st.text_input("Groq API key",
+                                     type="password", key="groq_key_input")
+            if groq_key:
+                os.environ["GROQ_API_KEY"] = groq_key
 
-    # Write runtime env vars so llm_config picks them up this session
-    os.environ["LLM_PROVIDER"] = "groq" if is_groq else "openai"
-    if is_groq:
+        model_options = list(GROQ_MODELS.keys())
+        groq_model    = st.selectbox(
+            "Model", model_options, key="groq_model_select",
+            index=0,
+        )
         os.environ["MODEL_NAME"] = groq_model
+        st.caption(GROQ_MODELS.get(groq_model,""))
+
+        LOW_TPM = {"llama-3.3-70b-versatile","qwen/qwen3-32b"}
+        if groq_model in LOW_TPM:
+            tpm = 6000 if "qwen" in groq_model else 12000
+            st.warning(f"⚠️ {tpm:,} TPM — may rate-limit with 6 agents. "
+                       f"Use llama-3.1-8b-instant for reliability.")
     else:
-        os.environ["MODEL_NAME"] = openai_model
+        oai_key = os.getenv("OPENAI_API_KEY","")
+        if oai_key and oai_key.startswith("sk-"):
+            st.markdown("● OpenAI API key loaded ✓")
+        else:
+            st.warning("Set OPENAI_API_KEY in .env")
+            oai_key = st.text_input("OpenAI API key",
+                                    type="password", key="oai_key_input")
+            if oai_key:
+                os.environ["OPENAI_API_KEY"] = oai_key
 
-    st.markdown("---")
-    st.markdown("#### Research Topic")
-    topic = st.text_input(
-        "Topic", value="Agentic AI and Multi-Agent Systems",
-        label_visibility="collapsed",
-        placeholder="e.g. Transformer attention mechanisms",
-    )
-    st.markdown("#### Research Question *(optional)*")
-    rq = st.text_area(
-        "RQ", label_visibility="collapsed",
-        placeholder="What specific question are you trying to answer?",
-        height=80,
-    )
-    st.markdown("#### Study Timeline")
-    days  = st.slider("Days available", 3, 30, 7)
-    hours = st.slider("Hours per day", 1, 8, 3)
-    st.markdown("---")
-    incl_planner = st.toggle("Study planner", value=True)
-    st.markdown("---")
-    st.markdown(
-        "<span style='color:#58A6FF;font-size:.8rem'>● Semantic Scholar: free</span>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<span style='color:#D29922;font-size:.8rem'>● KatzBot: crawls yu.edu/katz</span>",
-        unsafe_allow_html=True,
-    )
-    if not openai_ok:
-        st.markdown(
-            "<span style='color:#8B949E;font-size:.75rem'>"
-            "KatzBot embeddings: HuggingFace (free)</span>",
-            unsafe_allow_html=True,
+        oai_model = st.selectbox(
+            "Model", list(OPENAI_MODELS.keys()), key="oai_model_select"
         )
+        os.environ["MODEL_NAME"] = oai_model
+        st.caption(OPENAI_MODELS.get(oai_model,""))
 
+    st.markdown("---")
 
-# ── Header ────────────────────────────────────────────────────
+    # Research inputs
+    st.markdown("#### 🔬 Research Topic")
+    topic = st.text_input(
+        "Topic", placeholder="e.g. deepfake detection",
+        key="topic_input", label_visibility="collapsed",
+    )
+
+    st.markdown("#### ❓ Research Question *(optional)*")
+    research_question = st.text_area(
+        "Question", placeholder="What specific question are you trying to answer?",
+        key="rq_input", label_visibility="collapsed", height=80,
+    )
+
+    st.markdown("#### 📅 Study Timeline")
+    days         = st.slider("Days available", 1, 30, 7, key="days_slider")
+    hours_per_day= st.slider("Hours per day",  1, 12, 3, key="hours_slider")
+
+    st.markdown("---")
+    include_planner = st.toggle("Study planner", value=True, key="planner_toggle")
+
+    st.markdown("---")
+    st.caption("● Semantic Scholar: free")
+    st.caption("● KatzBot: crawls yu.edu/katz")
+
+# ── Header ─────────────────────────────────────────────────────
 st.markdown("""
-<div class="pm-header">
-  <div class="pm-eyebrow">Yeshiva University · Katz School of Science and Health</div>
-  <div class="pm-title">Paper<em>Mind</em></div>
-  <div class="pm-sub">
-    6 research agents + KatzBot RAG + Faculty Matcher — your complete AI research platform.
-    Find papers, map relationships, identify gaps, draft your lit review, and connect with 
-    the right Katz professor.
-  </div>
+<div style="margin-bottom:.5rem">
+<span style="font-size:.78rem;letter-spacing:.12em;color:#58A6FF;
+text-transform:uppercase">Yeshiva University · Katz School of Science and Health</span>
 </div>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<h1 style="font-size:2.4rem;font-weight:700;margin:0">
+KatzScholar<span style="color:#58A6FF;font-style:italic">Mind</span>
+</h1>
+<p style="color:#8B949E;margin:.3rem 0 1.2rem;font-size:.95rem">
+6 research agents + KatzBot RAG + Faculty Matcher + Live Events —
+your complete AI research platform.<br>
+Find papers, map relationships, identify gaps, draft your lit review,
+and connect with the right Katz professor.
+</p>
+""", unsafe_allow_html=True)
+
+st.markdown("---")
 
 # ── Tabs ──────────────────────────────────────────────────────
-(tab_run, tab_papers, tab_map, tab_gaps,
- tab_litrev, tab_plan, tab_chat,
- tab_katzbot, tab_faculty, tab_citations) = st.tabs([
+(tab_run, tab_papers, tab_map, tab_gaps, tab_litrev,
+ tab_plan, tab_chat, tab_katzbot, tab_events,
+ tab_advisor, tab_citations, tab_faculty) = st.tabs([
     "⚡ Run Agents",
     "📄 Papers Found",
     "🗺️ Relationship Map",
@@ -264,8 +187,10 @@ st.markdown("""
     "📅 Study Plan",
     "💬 PaperBot",
     "🎓 KatzBot",
-    "👨‍🏫 Faculty Match",
+    "📅 Katz Events",
+    "🧠 Smart Advisor",
     "📚 Citations (.bib)",
+    "👨‍🏫 Faculty Match",
 ])
 
 
@@ -273,848 +198,804 @@ st.markdown("""
 # TAB 1 — RUN AGENTS
 # ══════════════════════════════════════════════════════════════
 with tab_run:
-    col_agents, col_action = st.columns([3, 2], gap="large")
+    col_pipeline, col_config = st.columns([1, 1])
 
-    with col_agents:
-        st.markdown(
-            "<div style='font-family:monospace;font-size:.75rem;text-transform:uppercase;"
-            "letter-spacing:.12em;color:#8B949E;margin-bottom:.8rem'>Agent pipeline</div>",
-            unsafe_allow_html=True,
-        )
+    with col_pipeline:
+        st.markdown("#### AGENT PIPELINE")
         agents_info = [
-            ("01", "Crawler",      "Searches Semantic Scholar · finds 15–25 papers"),
+            ("01", "Crawler",      "Searches Semantic Scholar · finds 10-15 papers"),
             ("02", "Reader",       "Extracts claims, methods, findings per paper"),
             ("03", "Mapper",       "Maps agreements, contradictions, lineage"),
             ("04", "Gap Finder",   "Identifies unexplored research opportunities"),
             ("05", "Writer",       "Drafts the literature review section"),
+            ("06", "Study Planner","Builds day-by-day reading schedule"),
         ]
-        if incl_planner:
-            agents_info.append(("06", "Study Planner", "Builds day-by-day reading schedule"))
-
-        is_done = bool(st.session_state.results)
-        is_run  = st.session_state.running
-
-        st.markdown('<div class="agent-pipeline">', unsafe_allow_html=True)
+        has_results = st.session_state.results is not None
         for num, name, desc in agents_info:
-            state   = "done" if is_done else ("active" if is_run else "waiting")
-            st.markdown(f"""
-            <div class="agent-row {state}">
-                <div class="dot {state}"></div>
-                <div class="agent-num">{num}</div>
-                <div class="agent-name">{name}</div>
-                <div class="agent-desc">{desc}</div>
-            </div>""", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        if is_done:
-            st.markdown('<div class="stats-row">', unsafe_allow_html=True)
-            n = len(agents_info)
+            color = "#3FB950" if has_results else "#484F58"
             st.markdown(
-                f'<div class="stat-chip"><b>{n}</b> agents</div>'
-                f'<div class="stat-chip"><b>5</b> outputs</div>'
-                f'<div class="stat-chip"><b>{days}d</b> plan</div>'
-                f'<div class="stat-chip">Semantic Scholar ✓</div>',
+                f"<div style='background:#161B22;border:0.5px solid #30363D;"
+                f"border-radius:8px;padding:.6rem 1rem;margin:.25rem 0;"
+                f"display:flex;align-items:center;gap:.8rem'>"
+                f"<span style='color:{color};font-size:.85rem'>●</span>"
+                f"<span style='color:#8B949E;font-size:.8rem'>{num}</span>"
+                f"<span style='font-weight:500;color:#E6EDF3;font-size:.9rem'>{name}</span>"
+                f"<span style='color:#8B949E;font-size:.78rem;margin-left:auto'>{desc}</span>"
+                f"</div>",
                 unsafe_allow_html=True,
             )
-            st.markdown('</div>', unsafe_allow_html=True)
 
-    with col_action:
+    with col_config:
+        st.markdown("#### CONFIGURATION")
         st.markdown(
-            "<div style='font-family:monospace;font-size:.75rem;text-transform:uppercase;"
-            "letter-spacing:.12em;color:#8B949E;margin-bottom:.8rem'>Configuration</div>",
+            f"<div style='background:#161B22;border:0.5px solid #30363D;"
+            f"border-radius:8px;padding:1rem;margin-bottom:.8rem'>"
+            f"<div style='font-size:.72rem;letter-spacing:.1em;color:#8B949E;"
+            f"text-transform:uppercase;margin-bottom:.5rem'>TOPIC</div>"
+            f"<div style='font-size:1rem;font-weight:500;color:#E6EDF3'>"
+            f"{topic or 'Enter topic in sidebar'}</div>"
+            f"</div>",
             unsafe_allow_html=True,
         )
-        st.markdown(f"""
-        <div class="content-card">
-            <div class="card-label">Topic</div>
-            <div style="color:#E6EDF3;font-size:.95rem;font-weight:500">{topic}</div>
-            {"<div class='card-label' style='margin-top:.8rem'>Research question</div>"
-             + "<div style='color:#8B949E;font-size:.82rem;line-height:1.5'>"
-             + rq[:120] + "...</div>" if rq else ""}
-            <div class="card-label" style="margin-top:.8rem">Timeline</div>
-            <div style="color:#E6EDF3;font-size:.88rem">{days} days · {hours}h/day · {days*hours}h total</div>
-        </div>
-        """, unsafe_allow_html=True)
 
-        active_key_ok = groq_ok if is_groq else openai_ok
-        if not active_key_ok:
-            provider_label = "GROQ_API_KEY (console.groq.com — free)" if is_groq else "OPENAI_API_KEY"
+        run_btn = st.button(
+            "⚡ Run KatzScholarMind",
+            use_container_width=True,
+            type="primary",
+            key="run_btn",
+        )
+
+        if st.session_state.results:
+            st.download_button(
+                "⬇ Download all outputs (.md)",
+                data=_build_md_output(st.session_state.results, topic),
+                file_name=f"KatzScholarMind_{topic[:20].replace(' ','_')}.md",
+                mime="text/markdown",
+                use_container_width=True,
+                key="dl_all",
+            )
             st.markdown(
-                f"<div style='background:#1C0A0A;border:1px solid #F85149;border-radius:8px;"
-                f"padding:.8rem 1rem;font-size:.82rem;color:#F85149;margin:.8rem 0'>"
-                f"⚠ Add {provider_label} to .env to run agents</div>",
+                "<div style='background:#0D1F12;border:1px solid #3FB950;"
+                "border-radius:6px;padding:.5rem .8rem;font-size:.82rem;"
+                "color:#3FB950;margin-top:.5rem'>✅ Done! Switch to tabs above.</div>",
                 unsafe_allow_html=True,
             )
 
-        run_btn = st.button(
-            "⚡ Run PaperMind",
-            use_container_width=True,
-            disabled=st.session_state.running,
-        )
+    if run_btn:
+        if not topic.strip():
+            st.error("Enter a research topic in the sidebar first.")
+        else:
+            st.session_state.topic        = topic
+            st.session_state.results      = None
+            st.session_state.citations    = []
+            st.session_state.bib_file     = ""
+            st.session_state.smart_advice = None
 
-        if run_btn:
-            st.session_state.running = True
-            st.session_state.results = None
-            st.session_state.chat    = []
-            st.session_state.topic   = topic
-
-            with st.spinner("Agents working… 3–5 minutes"):
+            with st.spinner(f"Running 6 agents on '{topic}'… (2-5 min)"):
                 try:
                     from crew import run_papermind
                     results = run_papermind(
                         topic=topic,
-                        research_question=rq,
+                        research_question=research_question,
                         days=days,
-                        hours_per_day=hours,
-                        include_planner=incl_planner,
+                        hours_per_day=hours_per_day,
+                        include_planner=include_planner,
                     )
                     st.session_state.results = results
-                    has_output = any(
-                        results.get(k, "").strip()
-                        for k in ["papers", "lit_review", "gaps", "map"]
-                    )
-                    if has_output:
-                        st.success("✅ Done! Switch to the tabs above to see your results.")
-                    else:
-                        st.warning("Agents ran but output was empty. Check your API key.")
+                    st.success("✅ Done! Switch to the tabs above.")
+                    st.rerun()
                 except Exception as e:
-                    err = str(e)
-                    if st.session_state.results:
-                        st.warning(f"Minor issue at finish (results saved): {err[:120]}")
-                    else:
-                        st.error(f"Error: {err}")
-                finally:
-                    st.session_state.running = False
+                    st.error(f"Agent error: {e}")
 
-        if st.session_state.results:
-            r   = st.session_state.results
-            full = "\n\n---\n\n".join([
-                f"# Papers Found\n{r.get('papers','')}",
-                f"# Paper Extractions\n{r.get('extractions','')}",
-                f"# Relationship Map\n{r.get('map','')}",
-                f"# Research Gaps\n{r.get('gaps','')}",
-                f"# Literature Review Draft\n{r.get('lit_review','')}",
-                f"# Study Plan\n{r.get('study_plan','')}",
-            ])
-            st.download_button(
-                "⬇ Download all outputs (.md)",
-                data=full,
-                file_name=f"PaperMind_{topic[:30].replace(' ','_')}.md",
-                mime="text/markdown",
-                use_container_width=True,
-            )
+
 
 
 # ══════════════════════════════════════════════════════════════
-# TAB 2 — PAPERS
+# TAB 2 — PAPERS FOUND
 # ══════════════════════════════════════════════════════════════
 with tab_papers:
+    st.markdown("#### Papers found by the Crawler agent")
     if not st.session_state.results:
-        st.markdown("<div style='color:#8B949E;margin-top:2rem'>Run the agents first.</div>",
-                    unsafe_allow_html=True)
+        st.info("Run the agents first.")
     else:
-        st.markdown("### Papers found by the Crawler agent")
-        st.markdown(st.session_state.results.get("papers", "No output."))
-        st.download_button("⬇ Download papers list",
-                           data=st.session_state.results.get("papers", ""),
-                           file_name="papers_found.md", mime="text/markdown")
+        txt = st.session_state.results.get("papers","")
+        if txt:
+            st.markdown(txt)
+        else:
+            st.warning("No papers output found.")
 
 
 # ══════════════════════════════════════════════════════════════
 # TAB 3 — RELATIONSHIP MAP
 # ══════════════════════════════════════════════════════════════
 with tab_map:
+    st.markdown("#### Relationship Map")
     if not st.session_state.results:
-        st.markdown("<div style='color:#8B949E;margin-top:2rem'>Run the agents first.</div>",
-                    unsafe_allow_html=True)
+        st.info("Run the agents first.")
     else:
-        st.markdown("### How the papers relate to each other")
-        st.info("The Mapper agent identified agreement clusters, contradictions, "
-                "citation lineage, and the methodological landscape.")
-        st.markdown(st.session_state.results.get("map", "No output."))
-        st.download_button("⬇ Download relationship map",
-                           data=st.session_state.results.get("map", ""),
-                           file_name="relationship_map.md", mime="text/markdown")
+        txt = st.session_state.results.get("map","")
+        if txt:
+            st.markdown(txt)
+        else:
+            st.warning("No relationship map found.")
 
 
 # ══════════════════════════════════════════════════════════════
 # TAB 4 — RESEARCH GAPS
 # ══════════════════════════════════════════════════════════════
 with tab_gaps:
+    st.markdown("#### Research Gaps")
     if not st.session_state.results:
-        st.markdown("<div style='color:#8B949E;margin-top:2rem'>Run the agents first.</div>",
-                    unsafe_allow_html=True)
+        st.info("Run the agents first.")
     else:
-        st.markdown("### Research gaps identified by the Gap Finder agent")
-        st.markdown(
-            "<div style='background:#1C1A10;border:1px solid #D29922;border-radius:8px;"
-            "padding:.8rem 1rem;font-size:.85rem;color:#D29922;margin-bottom:1rem'>"
-            "🎯 These are genuine opportunities for your original research contribution"
-            "</div>", unsafe_allow_html=True,
-        )
-        st.markdown(st.session_state.results.get("gaps", "No output."))
-        st.download_button("⬇ Download gap analysis",
-                           data=st.session_state.results.get("gaps", ""),
-                           file_name="research_gaps.md", mime="text/markdown")
+        txt = st.session_state.results.get("gaps","")
+        if txt:
+            st.markdown(txt)
+        else:
+            st.warning("No gaps output found.")
 
 
 # ══════════════════════════════════════════════════════════════
-# TAB 5 — LIT REVIEW
+# TAB 5 — LIT REVIEW DRAFT
 # ══════════════════════════════════════════════════════════════
 with tab_litrev:
+    st.markdown("#### Literature Review Draft")
     if not st.session_state.results:
-        st.markdown("<div style='color:#8B949E;margin-top:2rem'>Run the agents first.</div>",
-                    unsafe_allow_html=True)
+        st.info("Run the agents first.")
     else:
-        st.markdown("### Literature review draft — ready to paste into your paper")
-        st.markdown(
-            "<div style='background:#0D1F12;border:1px solid #3FB950;border-radius:8px;"
-            "padding:.8rem 1rem;font-size:.85rem;color:#3FB950;margin-bottom:1rem'>"
-            "✍ Starting draft. Review, edit, and add your own voice before submitting."
-            "</div>", unsafe_allow_html=True,
-        )
-        lit = st.session_state.results.get("lit_review", "No output.")
-        st.markdown(lit)
-        with st.expander("📋 Per-paper extractions (Reader agent)"):
-            st.markdown(st.session_state.results.get("extractions", "No output."))
-        st.download_button("⬇ Download literature review draft",
-                           data=lit, file_name="literature_review_draft.md",
-                           mime="text/markdown")
+        txt = st.session_state.results.get("lit_review","")
+        if txt:
+            st.markdown(txt)
+            st.download_button(
+                "⬇ Download lit review (.md)",
+                data=txt, mime="text/markdown",
+                file_name=f"litreview_{topic[:20].replace(' ','_')}.md",
+                key="dl_litrev",
+            )
+        else:
+            st.warning("No literature review found.")
 
 
 # ══════════════════════════════════════════════════════════════
 # TAB 6 — STUDY PLAN
 # ══════════════════════════════════════════════════════════════
 with tab_plan:
+    st.markdown("#### Study Plan")
     if not st.session_state.results:
-        st.markdown("<div style='color:#8B949E;margin-top:2rem'>Run the agents first.</div>",
-                    unsafe_allow_html=True)
-    elif not st.session_state.results.get("study_plan"):
-        st.info("Study planner was not enabled. Re-run with the toggle on.")
+        st.info("Run the agents first.")
     else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Study days", days)
-        c2.metric("Hours/day", hours)
-        c3.metric("Total hours", days * hours)
-        st.markdown("### Your personalized reading & research plan")
-        st.markdown(st.session_state.results.get("study_plan", ""))
-        st.download_button("⬇ Download study plan",
-                           data=st.session_state.results.get("study_plan", ""),
-                           file_name="study_plan.md", mime="text/markdown")
+        txt = st.session_state.results.get("study_plan","")
+        if txt:
+            st.markdown(txt)
+        else:
+            st.info("Enable the Study Planner toggle and re-run.")
 
 
 # ══════════════════════════════════════════════════════════════
-# TAB 7 — PAPERBOT (research context chatbot)
+# TAB 7 — PAPERBOT
 # ══════════════════════════════════════════════════════════════
 with tab_chat:
-    st.markdown("### PaperBot — AI research discussion partner")
+    st.markdown("#### 💬 PaperBot — AI Research Assistant")
 
-    has_ctx = bool(st.session_state.results)
-    if has_ctx:
-        st.markdown(
-            "<div style='background:#0A1628;border:1px solid #1F6FEB;border-radius:8px;"
-            "padding:.6rem 1rem;font-size:.82rem;color:#58A6FF;margin-bottom:1rem'>"
-            "● PaperBot has full context from your literature analysis"
-            "</div>", unsafe_allow_html=True,
+    for msg in st.session_state.paperbot_chat:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Ask PaperBot anything about research…",
+                                key="paperbot_input"):
+        st.session_state.paperbot_chat.append(
+            {"role":"user","content":prompt}
         )
-    else:
-        st.markdown(
-            "<div style='background:#161B22;border:1px solid #30363D;border-radius:8px;"
-            "padding:.6rem 1rem;font-size:.82rem;color:#8B949E;margin-bottom:1rem'>"
-            "ℹ Run the agents first for context-aware answers"
-            "</div>", unsafe_allow_html=True,
-        )
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    if not st.session_state.chat:
-        st.markdown("""
-        <div class="chat-who">PaperBot</div>
-        <div class="bubble-bot">
-        I'm PaperBot — your research discussion partner.<br><br>
-        Ask me about the papers in your analysis, how to position your research,
-        which methodology to choose, or how to make your literature review stronger.
-        </div>""", unsafe_allow_html=True)
-    else:
-        for msg in st.session_state.chat:
-            who = "You" if msg["role"] == "user" else "PaperBot"
-            cls = "bubble-user" if msg["role"] == "user" else "bubble-bot"
-            st.markdown(
-                f'<div class="chat-who">{who}</div><div class="{cls}">{msg["content"]}</div>',
-                unsafe_allow_html=True,
-            )
-
-    if not st.session_state.chat:
-        st.markdown("<div style='font-size:.78rem;color:#8B949E;margin:.8rem 0 .4rem;"
-                    "font-family:monospace;text-transform:uppercase;letter-spacing:.1em'>"
-                    "Quick prompts</div>", unsafe_allow_html=True)
-        from chatbot import QUICK_PROMPTS
-        cols = st.columns(2)
-        for i, p in enumerate(QUICK_PROMPTS):
-            with cols[i % 2]:
-                if st.button(p, key=f"qp_{i}", use_container_width=True):
-                    st.session_state.chat.append({"role": "user", "content": p})
-                    st.rerun()
-
-    user_input = st.chat_input("Ask PaperBot about your research…")
-    if user_input:
-        st.session_state.chat.append({"role": "user", "content": user_input})
-        with st.spinner("PaperBot thinking…"):
-            try:
-                from chatbot import chat
-                ctx = ""
-                if st.session_state.results:
-                    r = st.session_state.results
-                    ctx = "\n\n".join([
-                        r.get("map", ""), r.get("gaps", ""),
-                        r.get("lit_review", "")[:2000],
-                    ])
-                reply = chat(st.session_state.chat, context=ctx)
-                st.session_state.chat.append({"role": "assistant", "content": reply})
-            except Exception as e:
-                st.error(f"PaperBot error: {e}")
-        st.rerun()
-
-    if st.session_state.chat:
-        if st.button("Clear PaperBot chat", type="secondary"):
-            st.session_state.chat = []
-            st.rerun()
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                try:
+                    from chatbot import chat
+                    sys_prompt = ""
+                    if st.session_state.results:
+                        ctx = st.session_state.results.get("lit_review","")[:500]
+                        sys_prompt = (
+                            "You are PaperBot, an AI research assistant. "
+                            f"The user is researching: '{st.session_state.topic}'. "
+                            f"Relevant context: {ctx}"
+                        )
+                    answer = chat(st.session_state.paperbot_chat, sys_prompt)
+                    st.markdown(answer)
+                    st.session_state.paperbot_chat.append(
+                        {"role":"assistant","content":answer}
+                    )
+                except Exception as e:
+                    st.error(f"PaperBot error: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
-# TAB 8 — KATZBOT (RAG over yu.edu/katz)
+# TAB 8 — KATZBOT
 # ══════════════════════════════════════════════════════════════
 with tab_katzbot:
     st.markdown("### 🎓 KatzBot — Yeshiva University AI Assistant")
-    st.markdown(
-        "<div style='background:#161B22;border:1px solid #D29922;border-radius:8px;"
-        "padding:.8rem 1rem;font-size:.85rem;color:#D29922;margin-bottom:1rem'>"
-        "KatzBot is grounded in the real Katz School website (yu.edu/katz). "
-        "Ask about programs, faculty, research, admissions, events — anything on the site."
-        "</div>", unsafe_allow_html=True,
-    )
 
-    # Index status
-    col_kb1, col_kb2 = st.columns([3, 1])
-    with col_kb1:
+    st.markdown("""
+    <div style="background:#1C1A10;border:1px solid #D29922;border-radius:8px;
+    padding:.7rem 1rem;font-size:.84rem;color:#D29922;margin-bottom:.8rem">
+    KatzBot is grounded in the real Katz School website (yu.edu/katz).
+    Ask about programs, faculty, research, admissions, events — anything on the site.
+    </div>""", unsafe_allow_html=True)
+
+    kb1, kb2 = st.columns([3, 1])
+    with kb2:
+        build_btn = st.button("🔨 Build / Refresh Index",
+                              key="build_index_btn",
+                              use_container_width=True)
+    with kb1:
         if not st.session_state.katzbot_ready:
-            st.info(
-                "KatzBot needs to index the Katz School website before answering. "
-                "First run takes ~5 minutes (crawls ~60 pages). "
-                "Subsequent runs load instantly from disk."
+            st.markdown(
+                "<div style='font-size:.82rem;color:#8B949E;padding:.35rem 0'>"
+                "First run: click <b>Build / Refresh Index</b> (~5 min, "
+                "saved to disk for instant reload next time)."
+                "</div>", unsafe_allow_html=True
             )
-    with col_kb2:
-        build_btn = st.button(
-            "🔨 Build / Refresh Index",
-            key="build_katz_index",
-            use_container_width=True,
-        )
+        else:
+            st.markdown(
+                "<div style='color:#3FB950;font-size:.82rem;padding:.35rem 0'>"
+                "✅ KatzBot index loaded — ask anything!</div>",
+                unsafe_allow_html=True
+            )
 
     if build_btn:
-        with st.spinner("Crawling yu.edu/katz and building vector index… (~5 min first time)"):
+        with st.spinner("Crawling yu.edu/katz and building FAISS index… (~5 min first time, instant after)"):
             try:
                 from katzbot.rag_engine import get_engine
                 engine = get_engine()
-                stats = engine.build(force_refresh=True)
+                stats  = engine.build(force_refresh=True)
                 st.session_state.katzbot_ready = True
-                st.session_state.katzbot_ready = True
-                st.success("✅ KatzBot index ready!")
+                st.success(
+                    f"✅ Index ready! "
+                    f"{stats.get('web_pages',0)} web pages + "
+                    f"{stats.get('faculty_docs',0)} faculty docs → "
+                    f"{stats.get('index_vectors',0):,} vectors. "
+                    f"Saved to disk — next start loads instantly."
+                )
             except Exception as e:
                 st.error(f"Index build failed: {e}")
-                st.info("Tip: Set GROQ_API_KEY in .env.")
+                st.info("Tip: Set GROQ_API_KEY in .env. "
+                        "Run: python katzbot/build_index.py")
 
-    # Chat display
+    # Chat interface
+    st.markdown("---")
     if not st.session_state.katz_chat:
         st.markdown("""
-        <div class="chat-who">KatzBot</div>
-        <div class="bubble-bot">
-        Hi! I'm KatzBot, grounded in the Yeshiva University Katz School website.<br><br>
-        Ask me about <b>programs</b> (AI, CS, Data Analytics, Cybersecurity),
-        <b>faculty research</b>, <b>admissions</b>, <b>tuition</b>, <b>events</b>,
-        or anything else on the Katz School site.<br><br>
-        Click "Build / Refresh Index" above first if this is your first time.
+        <div style="background:#161B22;border:0.5px solid #30363D;
+        border-radius:8px;padding:1rem;margin-bottom:.8rem">
+        <div style="font-weight:500;color:#E6EDF3;margin-bottom:.4rem">
+        Hi! I'm KatzBot, grounded in the Yeshiva University Katz School website.</div>
+        <div style="color:#8B949E;font-size:.84rem">
+        Ask me about <b style="color:#C9D1D9">programs</b> (AI, CS, Data Analytics,
+        Cybersecurity), <b style="color:#C9D1D9">faculty research</b>,
+        <b style="color:#C9D1D9">admissions</b>, <b style="color:#C9D1D9">tuition</b>,
+        <b style="color:#C9D1D9">events</b>, or anything else on the Katz School site.
+        </div>
         </div>""", unsafe_allow_html=True)
-    else:
-        for msg in st.session_state.katz_chat:
-            who = "You" if msg["role"] == "user" else "KatzBot"
-            cls = "bubble-user" if msg["role"] == "user" else "bubble-bot"
+
+    # Quick prompts
+    st.markdown("**Quick prompts:**")
+    qp_cols = st.columns(3)
+    quick_prompts = [
+        "What programs does Katz School offer?",
+        "Who is the chair of Computer Science?",
+        "Tell me about the M.S. in AI program",
+        "What is tuition at Katz School?",
+        "Who should I contact about cybersecurity research?",
+        "What research is happening in machine learning?",
+    ]
+    for i, qp in enumerate(quick_prompts):
+        with qp_cols[i % 3]:
+            if st.button(qp, key=f"qp_{i}", use_container_width=True):
+                st.session_state.katz_chat.append({"role":"user","content":qp})
+
+    # Chat display
+    for msg in st.session_state.katz_chat:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            if msg.get("sources"):
+                srcs = [s.split("/")[-1] for s in msg["sources"][:3] if s]
+                if srcs:
+                    st.markdown(
+                        "<div style='margin-top:.4rem'><span style='font-size:.72rem;"
+                        "color:#8B949E'>Sources: </span>"
+                        + " · ".join(
+                            f"<span style='background:#161B22;color:#58A6FF;"
+                            f"padding:1px 6px;border-radius:4px;font-size:.72rem'>"
+                            f"{s}</span>"
+                            for s in srcs
+                        )
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+            if msg.get("faculty"):
+                for f in msg["faculty"][:2]:
+                    st.markdown(
+                        f"<div style='margin-top:.3rem;font-size:.78rem;"
+                        f"color:#8B949E'>👨‍🏫 <b style='color:#C9D1D9'>{f['name']}</b>"
+                        f" — <a href='mailto:{f['email']}' style='color:#58A6FF'>"
+                        f"{f['email']}</a></div>",
+                        unsafe_allow_html=True,
+                    )
+
+    # Input
+    katz_input = st.chat_input(
+        "Ask KatzBot about Yeshiva University / Katz School…",
+        key="katzbot_input",
+    )
+    if katz_input:
+        st.session_state.katz_chat.append({"role":"user","content":katz_input})
+        with st.chat_message("user"):
+            st.markdown(katz_input)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Searching Katz School knowledge base…"):
+                try:
+                    from katzbot.rag_engine import get_engine
+                    engine = get_engine()
+                    extra  = ""
+                    if st.session_state.results:
+                        extra = st.session_state.results.get("gaps","")[:300]
+                    result = engine.ask(
+                        katz_input,
+                        history=st.session_state.katz_chat,
+                        extra_context=extra,
+                    )
+                    answer  = result["answer"]
+                    sources = result["sources"]
+                    faculty = result["faculty_matches"]
+
+                    st.markdown(answer)
+                    st.session_state.katz_chat.append({
+                        "role":    "assistant",
+                        "content": answer,
+                        "sources": sources,
+                        "faculty": faculty,
+                    })
+                    st.rerun()
+                except Exception as e:
+                    err = f"KatzBot error: {e}"
+                    st.error(err)
+                    st.session_state.katz_chat.append(
+                        {"role":"assistant","content":err}
+                    )
+
+
+# ══════════════════════════════════════════════════════════════
+# TAB 9 — KATZ EVENTS
+# ══════════════════════════════════════════════════════════════
+with tab_events:
+    st.markdown("### 📅 Katz School Events & News")
+
+    st.markdown("""
+    <div style="background:#0A1628;border:1px solid #1F6FEB;border-radius:8px;
+    padding:.8rem 1rem;font-size:.84rem;color:#58A6FF;margin-bottom:1rem">
+    Live events fetched from <b>yu.edu/katz/events</b>, <b>yu.edu/events</b>,
+    and the YU graduate calendar. Cached 6 hours. Refreshes automatically.
+    </div>""", unsafe_allow_html=True)
+
+    ev1, ev2 = st.columns([1,1])
+    with ev1:
+        if st.button("🔄 Refresh Events", key="refresh_ev_btn",
+                     use_container_width=True, type="primary"):
+            with st.spinner("Fetching from yu.edu/katz…"):
+                try:
+                    from katzbot.events_fetcher import fetch_events
+                    st.session_state.events = fetch_events(force_refresh=True)
+                    st.success(f"✅ {len(st.session_state.events)} events loaded!")
+                except Exception as e:
+                    st.error(f"Events error: {e}")
+                    from katzbot.events_fetcher import STATIC_EVENTS
+                    st.session_state.events = STATIC_EVENTS
+            st.rerun()
+    with ev2:
+        st.markdown(
+            '<a href="https://www.yu.edu/katz/events" target="_blank">'
+            '<button style="width:100%;padding:.45rem;background:transparent;'
+            'border:1px solid #30363D;border-radius:6px;color:#58A6FF;'
+            'cursor:pointer;font-size:.85rem">🌐 Open yu.edu/katz/events</button>'
+            '</a>', unsafe_allow_html=True
+        )
+
+    # Auto-load
+    if not st.session_state.events:
+        with st.spinner("Loading Katz events…"):
+            try:
+                from katzbot.events_fetcher import fetch_events
+                st.session_state.events = fetch_events()
+            except Exception:
+                from katzbot.events_fetcher import STATIC_EVENTS
+                st.session_state.events = STATIC_EVENTS
+
+    events = st.session_state.events
+    if events:
+        # Show relevant events if research has run
+        cur_topic = st.session_state.topic or topic
+        if cur_topic and st.session_state.results:
+            try:
+                from katzbot.events_fetcher import match_events_to_topic
+                rel = match_events_to_topic(events, cur_topic, top_k=3)
+                if rel:
+                    st.markdown("#### 🎯 Relevant to your research")
+                    for ev in rel:
+                        st.markdown(
+                            f"<div style='background:#0D1F12;border:1px solid #3FB950;"
+                            f"border-radius:8px;padding:.9rem 1.1rem;margin:.4rem 0'>"
+                            f"<b style='color:#3FB950'>⭐ {ev.get('title','')}</b><br>"
+                            f"<span style='color:#8B949E;font-size:.77rem'>"
+                            f"📅 {ev.get('date','TBD')} · 📍 {ev.get('location','')}</span><br>"
+                            f"<span style='color:#C9D1D9;font-size:.82rem'>"
+                            f"{ev.get('description','')[:180]}</span><br>"
+                            f"<a href='{ev.get('url','#')}' target='_blank' "
+                            f"style='color:#58A6FF;font-size:.78rem'>🔗 More info →</a>"
+                            f"</div>", unsafe_allow_html=True
+                        )
+                    st.markdown("---")
+            except Exception:
+                pass
+
+        # All events with category filter
+        st.markdown(f"#### All Katz Events ({len(events)} total)")
+        cats = ["All"] + sorted(set(ev.get("category","") for ev in events if ev.get("category")))
+        cat  = st.selectbox("Filter", cats, key="ev_cat", label_visibility="collapsed")
+        show = events if cat == "All" else [e for e in events if e.get("category")==cat]
+
+        COLOR_MAP = {
+            "CS & AI Club":"#58A6FF","Research":"#3FB950",
+            "Admissions":"#D29922","Graduate School":"#BC8CFF",
+        }
+        TYPE_ICON = {"competition":"🏆","symposium":"🔬",
+                     "info_session":"ℹ️","club":"👥","general":"📢"}
+        for ev in show:
+            accent = COLOR_MAP.get(ev.get("category",""),"#58A6FF")
+            icon   = TYPE_ICON.get(ev.get("type",""),"📅")
             st.markdown(
-                f'<div class="chat-who">{who}</div><div class="{cls}">{msg["content"]}</div>',
-                unsafe_allow_html=True,
+                f"<div style='background:#161B22;border:1px solid #30363D;"
+                f"border-left:4px solid {accent};border-radius:0 8px 8px 0;"
+                f"padding:.85rem 1.1rem;margin:.35rem 0'>"
+                f"<b style='color:#E6EDF3'>{icon} {ev.get('title','')}</b><br>"
+                f"<span style='color:#8B949E;font-size:.76rem'>"
+                f"📅 {ev.get('date','TBD')}"
+                f"{' · ' + ev.get('time','') if ev.get('time') else ''}"
+                f"{' · 📍 ' + ev.get('location','') if ev.get('location') else ''}"
+                f"</span><br>"
+                f"<span style='color:#C9D1D9;font-size:.82rem'>"
+                f"{ev.get('description','')[:180]}</span><br>"
+                f"<a href='{ev.get('url','https://www.yu.edu/katz/events')}' "
+                f"target='_blank' style='color:#58A6FF;font-size:.76rem'>"
+                f"🔗 {ev.get('url','').replace('https://','')[:50]} →</a>"
+                f"</div>", unsafe_allow_html=True
             )
 
-    # Quick prompts for KatzBot
-    if not st.session_state.katz_chat:
-        katz_prompts = [
-            "What programs does Katz School offer?",
-            "Who is the chair of Computer Science?",
-            "Tell me about the M.S. in AI program",
-            "What research is happening in machine learning?",
-            "How much is tuition at Katz School?",
-            "Who should I contact about cybersecurity research?",
-        ]
-        st.markdown("<div style='font-size:.78rem;color:#8B949E;margin:.8rem 0 .4rem;"
-                    "font-family:monospace;text-transform:uppercase;letter-spacing:.1em'>"
-                    "Quick prompts</div>", unsafe_allow_html=True)
-        kc = st.columns(2)
-        for i, p in enumerate(katz_prompts):
-            with kc[i % 2]:
-                if st.button(p, key=f"kqp_{i}", use_container_width=True):
-                    st.session_state.katz_chat.append({"role": "user", "content": p})
-                    st.rerun()
 
-    katz_input = st.chat_input("Ask KatzBot about Yeshiva University / Katz School…")
-    if katz_input:
-        st.session_state.katz_chat.append({"role": "user", "content": katz_input})
-        with st.spinner("KatzBot searching yu.edu/katz…"):
+# ══════════════════════════════════════════════════════════════
+# TAB 10 — SMART ADVISOR
+# ══════════════════════════════════════════════════════════════
+with tab_advisor:
+    st.markdown("### 🧠 Smart Advisor")
+    st.markdown("""
+    <div style="background:#0A1628;border:1px solid #1F6FEB;border-radius:8px;
+    padding:.8rem 1rem;font-size:.84rem;color:#58A6FF;margin-bottom:1rem">
+    <b>Complete academic loop:</b> Research gap → matching Katz faculty →
+    upcoming relevant events → ready-to-send email template.
+    </div>""", unsafe_allow_html=True)
+
+    adv_topic = st.session_state.topic or topic
+    adv_gaps  = (st.session_state.results.get("gaps","")
+                 if st.session_state.results else "")
+
+    advc1, advc2 = st.columns([3,1])
+    with advc2:
+        run_adv = st.button("🧠 Get Smart Advice", key="run_adv_btn",
+                            use_container_width=True, type="primary")
+    with advc1:
+        st.markdown(
+            f"<div style='color:#8B949E;font-size:.84rem;padding:.35rem 0'>"
+            f"Topic: <b style='color:#E6EDF3'>{adv_topic or 'run agents first'}</b>"
+            f"{'  · Gaps available ✓' if adv_gaps else ''}"
+            f"</div>", unsafe_allow_html=True
+        )
+
+    if run_adv or (st.session_state.results and not st.session_state.smart_advice):
+        with st.spinner("Matching faculty and events…"):
             try:
-                from katzbot.rag_engine import get_engine
-                engine = get_engine()
-
-                # Pass research context if agents have run
-                extra_ctx = ""
-                if st.session_state.results:
-                    extra_ctx = st.session_state.results.get("gaps", "")[:500]
-
-                result = engine.ask(katz_input, history=st.session_state.katz_chat, extra_context=extra_ctx)
-                answer  = result["answer"]
-                sources = result["sources"]
-
-                # Show faculty suggestions if relevant
-                fac_html = ""
-                if result["faculty_matches"]:
-                    fac_html = "<br><br><b style='color:#D29922'>Relevant faculty:</b><br>"
-                    for f in result["faculty_matches"][:2]:
-                        fac_html += (
-                            f"• <b>{f['name']}</b> — {f['title']}<br>"
-                            f"  <a href='mailto:{f['email']}' style='color:#58A6FF'>"
-                            f"{f['email']}</a><br>"
-                        )
-
-                sources_html = ""
-                if sources:
-                    pills = "".join(
-                        f"<span class='source-pill'>{s.split('/')[-1] or s}</span>"
-                        for s in sources[:4]
-                    )
-                    sources_html = f"<br><br><span style='font-size:.72rem;color:#8B949E'>Sources:</span><br>{pills}"
-
-                full_reply = answer + fac_html + sources_html
-                st.session_state.katz_chat.append({"role": "assistant", "content": full_reply})
-                st.session_state.katzbot_ready = True
-
+                from katzbot.smart_advisor import get_smart_advice
+                st.session_state.smart_advice = get_smart_advice(
+                    topic=adv_topic, gaps_text=adv_gaps
+                )
             except Exception as e:
-                st.session_state.katz_chat.append({
-                    "role": "assistant",
-                    "content": f"⚠ KatzBot needs the index to be built first. "
-                               f"Click 'Build / Refresh Index' above. (Error: {str(e)[:80]})"
-                })
+                st.error(f"Smart Advisor error: {e}")
         st.rerun()
 
-    if st.session_state.katz_chat:
-        if st.button("Clear KatzBot chat", type="secondary", key="clear_katz"):
-            st.session_state.katz_chat = []
+    if st.session_state.smart_advice:
+        adv = st.session_state.smart_advice
+
+        if adv.get("faculty_matches"):
+            st.markdown("#### 👨‍🏫 Recommended Faculty")
+            for f in adv["faculty_matches"]:
+                exp = " · ".join(f["expertise"][:4])
+                st.markdown(
+                    f"<div style='background:#161B22;border:0.5px solid #30363D;"
+                    f"border-left:4px solid #58A6FF;border-radius:0 8px 8px 0;"
+                    f"padding:.9rem 1.1rem;margin:.4rem 0'>"
+                    f"<b style='color:#E6EDF3'>{f['name']}</b><br>"
+                    f"<span style='color:#8B949E;font-size:.77rem'>"
+                    f"{f['title']} · {f['dept']}</span><br>"
+                    f"<span style='color:#C9D1D9;font-size:.8rem'>{exp}</span><br>"
+                    f"<span style='color:#8B949E;font-size:.77rem;font-style:italic'>"
+                    f"{f['note']}</span><br>"
+                    f"<a href='mailto:{f['email']}' style='color:#58A6FF;font-size:.8rem'>"
+                    f"✉ {f['email']}</a> · "
+                    f"<a href='{f['profile']}' target='_blank' "
+                    f"style='color:#58A6FF;font-size:.8rem'>Profile →</a>"
+                    f"</div>", unsafe_allow_html=True
+                )
+
+        if adv.get("event_matches"):
+            st.markdown("#### 📅 Relevant Events")
+            for ev in adv["event_matches"]:
+                st.markdown(
+                    f"<div style='background:#1C1A10;border:1px solid #D29922;"
+                    f"border-radius:8px;padding:.85rem 1.1rem;margin:.4rem 0'>"
+                    f"<b style='color:#D29922'>{ev.get('title','')}</b><br>"
+                    f"<span style='color:#8B949E;font-size:.77rem'>"
+                    f"📅 {ev.get('date','TBD')} · 📍 {ev.get('location','')}</span><br>"
+                    f"<span style='color:#C9D1D9;font-size:.82rem'>"
+                    f"{ev.get('description','')[:150]}</span><br>"
+                    f"<a href='{ev.get('url','#')}' target='_blank' "
+                    f"style='color:#58A6FF;font-size:.78rem'>🔗 More info →</a>"
+                    f"</div>", unsafe_allow_html=True
+                )
+
+        if adv.get("action_items"):
+            st.markdown("#### ✅ Action Items")
+            for i, action in enumerate(adv["action_items"], 1):
+                st.markdown(
+                    f"<div style='background:#161B22;border:0.5px solid #30363D;"
+                    f"border-radius:6px;padding:.55rem .9rem;margin:.2rem 0;"
+                    f"font-size:.84rem;color:#C9D1D9'>"
+                    f"<b style='color:#3FB950'>{i}.</b> {action}</div>",
+                    unsafe_allow_html=True
+                )
+
+        st.markdown("---")
+        st.markdown("#### ✉ Email Template Generator")
+        sname = st.text_input("Your name", key="adv_name",
+                              placeholder="Enter your name")
+        if sname and adv.get("faculty_matches"):
+            fac_opts = [f["name"] for f in adv["faculty_matches"]]
+            sel_name = st.selectbox("Faculty to email", fac_opts, key="adv_fac")
+            sel_fac  = next((f for f in adv["faculty_matches"]
+                             if f["name"]==sel_name), adv["faculty_matches"][0])
+            top_gap  = ""
+            if adv_gaps:
+                lines   = [l.strip() for l in adv_gaps.split("\n") if l.strip()]
+                top_gap = lines[0][:120] if lines else ""
+            try:
+                from katzbot.smart_advisor import format_email_template
+                email_text = format_email_template(sname, sel_fac, adv_topic, top_gap)
+                st.text_area("Copy and send:", value=email_text, height=250,
+                             key="email_ta")
+                st.download_button("⬇️ Download email",
+                    data=email_text,
+                    file_name=f"email_{sel_fac['name'].replace(' ','_')}.txt",
+                    mime="text/plain", key="dl_email")
+            except Exception as e:
+                st.error(f"Email error: {e}")
+
+        if st.button("🔄 Re-run Advisor", key="rerun_adv"):
+            st.session_state.smart_advice = None
             st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════
-# TAB 9 — FACULTY MATCH
-# ══════════════════════════════════════════════════════════════
-with tab_faculty:
-    st.markdown("### 👨‍🏫 Katz School Faculty — Find Your Research Supervisor")
-    st.markdown(
-        "<div style='background:#161B22;border:1px solid #58A6FF;border-radius:8px;"
-        "padding:.8rem 1rem;font-size:.85rem;color:#58A6FF;margin-bottom:1.2rem'>"
-        "Based on your research topic, here are the Katz School faculty members "
-        "most relevant to your work — with direct contact info from yu.edu/katz/faculty"
-        "</div>", unsafe_allow_html=True,
-    )
-
-    from katzbot.faculty import match_faculty, KATZ_FACULTY
-
-    # Auto-match from topic if agents have run
-    search_topic = st.session_state.topic or topic
-
-    if search_topic:
-        matched = match_faculty(search_topic)
-        if matched:
-            st.markdown(
-                f"<div style='font-size:.82rem;color:#8B949E;margin-bottom:1rem'>"
-                f"Matched to your topic: <b style='color:#E6EDF3'>{search_topic}</b>"
-                f"</div>", unsafe_allow_html=True,
-            )
-            st.markdown("#### 🎯 Top matches for your research")
-            for f in matched:
-                expertise_str = " · ".join(f["expertise"][:5])
-                st.markdown(f"""
-                <div class="fac-card">
-                    <div class="fac-name">{f['name']}</div>
-                    <div class="fac-title">{f['title']}</div>
-                    <div class="fac-dept">{f['dept']}</div>
-                    <div class="fac-expertise">{expertise_str}</div>
-                    <div class="fac-contact">
-                        <a href="mailto:{f['email']}">✉ {f['email']}</a> &nbsp;·&nbsp;
-                        <a href="{f['profile']}" target="_blank">Faculty profile →</a>
-                    </div>
-                    <div class="fac-note">{f['note']}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("#### 🔍 Search all faculty")
-
-    search_q = st.text_input(
-        "Search by name, topic, or keyword",
-        placeholder="e.g. healthcare, LLMs, cybersecurity, deep learning…",
-        label_visibility="collapsed",
-    )
-
-    dept_filter = st.selectbox(
-        "Filter by department",
-        ["All departments",
-         "M.S. in Artificial Intelligence",
-         "Computer Science & Engineering",
-         "Data Analytics & Visualization",
-         "Cybersecurity",
-         "Mathematical Sciences"],
-        label_visibility="collapsed",
-    )
-
-    # Filter faculty
-    display_faculty = KATZ_FACULTY
-    if search_q:
-        q = search_q.lower()
-        display_faculty = [
-            f for f in display_faculty
-            if q in f["name"].lower()
-            or q in f["note"].lower()
-            or any(q in kw.lower() for kw in f["expertise"])
-        ]
-    if dept_filter != "All departments":
-        display_faculty = [f for f in display_faculty if f["dept"] == dept_filter]
-
-    if not display_faculty:
-        st.markdown("<div style='color:#8B949E;margin-top:1rem'>No faculty match this filter.</div>",
-                    unsafe_allow_html=True)
-    else:
-        for f in display_faculty:
-            expertise_str = " · ".join(f["expertise"][:6])
-            color_map = {
-                "M.S. in Artificial Intelligence": "#58A6FF",
-                "Computer Science & Engineering":  "#3FB950",
-                "Data Analytics & Visualization":  "#BC8CFF",
-                "Cybersecurity":                   "#F85149",
-                "Mathematical Sciences":           "#D29922",
-            }
-            accent = color_map.get(f["dept"], "#58A6FF")
-            st.markdown(f"""
-            <div class="fac-card" style="border-left-color:{accent}">
-                <div class="fac-name">{f['name']}</div>
-                <div class="fac-title">{f['title']}</div>
-                <div class="fac-dept" style="color:{accent}">{f['dept']}</div>
-                <div class="fac-expertise">{expertise_str}</div>
-                <div class="fac-contact">
-                    <a href="mailto:{f['email']}">✉ {f['email']}</a> &nbsp;·&nbsp;
-                    <a href="{f['profile']}" target="_blank">Faculty profile →</a>
-                </div>
-                <div class="fac-note">{f['note']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("""
-    <div style='background:#161B22;border:1px solid #30363D;border-radius:8px;
-    padding:1rem 1.2rem;font-size:.85rem;color:#8B949E;line-height:1.8'>
-    <b style='color:#E6EDF3'>📧 How to email a professor about your research:</b><br>
-    Subject: <i>Student Research Inquiry — [Your Topic] — Ideathon 2026</i><br><br>
-    "Dear Prof. [Name],<br>
-    I am a student in the Katz School's M.S. in [your program] participating in the 
-    Ideathon 2026. I have built [brief description of PaperMind/your project] and would 
-    greatly appreciate 10 minutes of your feedback before the competition on [date].<br>
-    My project addresses [specific gap you found]. I believe it aligns with your work 
-    in [their expertise area].<br>
-    Thank you for your time."
-    </div>
-    """, unsafe_allow_html=True)
-
-
-
-
-# ══════════════════════════════════════════════════════════════
-# TAB 10 — CITATIONS (.bib)
+# TAB 11 — CITATIONS
 # ══════════════════════════════════════════════════════════════
 with tab_citations:
     st.markdown("### 📚 BibTeX Citations — Overleaf Ready")
-
     st.markdown("""
     <div style="background:#0A1628;border:1px solid #1F6FEB;border-radius:8px;
-    padding:.8rem 1rem;font-size:.84rem;color:#58A6FF;margin-bottom:1rem;line-height:1.7">
-    <b>How it works:</b> Titles extracted from Papers tab →
-    matched against <b>Semantic Scholar API</b> (with automatic retry on rate limits)
-    → exact BibTeX built from real metadata. Unmatched titles are filled via topic search.
-    </div>
-    """, unsafe_allow_html=True)
+    padding:.8rem 1rem;font-size:.84rem;color:#58A6FF;margin-bottom:1rem">
+    Titles extracted from Crawler output → matched against
+    <b>Semantic Scholar API</b> → exact BibTeX (real DOI, authors, venue).
+    Download as <code>references.bib</code> → upload to Overleaf.
+    </div>""", unsafe_allow_html=True)
 
-    if not st.session_state.results or not st.session_state.results.get("papers","").strip():
-        st.markdown("""
-        <div style="background:#161B22;border:1px solid #30363D;border-radius:8px;
-        padding:2rem;text-align:center;color:#8B949E">
-            <div style="font-size:1.8rem;margin-bottom:.4rem">📄</div>
-            <div style="color:#C9D1D9;font-weight:500;margin-bottom:.3rem">No papers yet</div>
-            Run the agents first (⚡ Run Agents tab), then return here.
-        </div>
-        """, unsafe_allow_html=True)
+    if not st.session_state.results:
+        st.info("Run the agents first, then fetch citations.")
     else:
         papers_text   = st.session_state.results.get("papers","")
         current_topic = st.session_state.topic or topic
 
-        # ── Prompt banner if not yet fetched ─────────────────
         if not st.session_state.citations:
             st.markdown("""
-            <div style="background:#1C1A10;border:1px solid #D29922;border-radius:8px;
-            padding:.7rem 1rem;font-size:.84rem;color:#D29922;margin-bottom:.8rem">
-            ⚡ Papers are ready. Click <b>Fetch BibTeX</b> to get exact citations.
-            This takes 2–4 minutes (Semantic Scholar rate limits to ~1 request/2s).
-            </div>
-            """, unsafe_allow_html=True)
+            <div style="background:#1C1A10;border:1px solid #D29922;
+            border-radius:8px;padding:.7rem 1rem;font-size:.84rem;
+            color:#D29922;margin-bottom:.8rem">
+            ⚡ Papers found! Click <b>Fetch BibTeX</b> (~2-4 min).
+            </div>""", unsafe_allow_html=True)
 
-        # ── Action bar ────────────────────────────────────────
-        ac1, ac2, ac3 = st.columns([2, 2, 3])
-        with ac1:
-            fetch_btn = st.button(
-                "🔍 Fetch BibTeX",
-                key="fetch_cit_btn",
-                use_container_width=True,
-                type="primary",
-            )
-        with ac2:
+        cc1, cc2, cc3 = st.columns([2,2,3])
+        with cc1:
+            fetch_cit = st.button("🔍 Fetch BibTeX",
+                                  key="fetch_cit", use_container_width=True,
+                                  type="primary")
+        with cc2:
             if st.session_state.citations:
                 st.download_button(
                     "⬇️ Download references.bib",
                     data=st.session_state.bib_file,
                     file_name=f"references_{current_topic[:20].replace(' ','_')}.bib",
                     mime="text/plain",
-                    use_container_width=True,
-                    key="dl_bib_top",
+                    use_container_width=True, key="dl_bib_top",
                 )
-        with ac3:
+        with cc3:
             if st.session_state.citations:
-                n = len(st.session_state.citations)
                 st.markdown(
                     f"<div style='color:#3FB950;font-size:.84rem;padding:.4rem 0'>"
-                    f"✅ {n} verified citations ready</div>",
+                    f"✅ {len(st.session_state.citations)} verified citations ready</div>",
                     unsafe_allow_html=True
                 )
 
-        # ── Fetch handler ─────────────────────────────────────
-        if fetch_btn:
-            prog      = st.progress(0, text="Starting…")
-            status    = st.empty()
-
+        if fetch_cit:
+            prog   = st.progress(0, text="Extracting titles…")
+            status = st.empty()
             try:
                 from tools.citation_fetcher import (
-                    fetch_citations_from_papers_text,
-                    extract_titles_from_text,
-                    build_bib_file,
+                    fetch_citations_from_papers_text, build_bib_file,
+                    save_bib_to_disk, print_citations_summary,
                 )
-
-                # Show how many titles we found
-                titles = extract_titles_from_text(papers_text)
-                n_titles = len(titles)
-
-                status.info(
-                    f"📖 Found **{n_titles} paper titles** in agent output. "
-                    f"Searching Semantic Scholar… (allow 2–4 min due to API rate limits)"
-                )
-                prog.progress(10, text=f"Searching {n_titles} titles on Semantic Scholar…")
-
-                if n_titles == 0:
-                    status.warning(
-                        "Could not extract titles from agent output — "
-                        "falling back to topic search."
-                    )
-
-                citations = fetch_citations_from_papers_text(
+                prog.progress(15, text="Searching Semantic Scholar…")
+                cits = fetch_citations_from_papers_text(
                     papers_text=papers_text,
                     topic=current_topic,
                     delay=2.5,
                 )
-
-                prog.progress(95, text="Building .bib file…")
-
-                if citations:
-                    from tools.citation_fetcher import (
-                        save_bib_to_disk, print_citations_summary
-                    )
-                    bib      = build_bib_file(citations, topic=current_topic)
+                prog.progress(90, text="Building .bib file…")
+                if cits:
+                    bib      = build_bib_file(cits, topic=current_topic)
                     saved_to = save_bib_to_disk(bib, topic=current_topic,
                                                 output_dir="outputs")
-                    print_citations_summary(citations)
-
-                    st.session_state.citations  = citations
-                    st.session_state.bib_file   = bib
-                    st.session_state.bib_saved  = saved_to
+                    print_citations_summary(cits)
+                    st.session_state.citations = cits
+                    st.session_state.bib_file  = bib
+                    st.session_state.bib_saved = saved_to
                     prog.progress(100, text="Done!")
                     status.success(
-                        f"✅ **{len(citations)} citations fetched!** "
+                        f"✅ {len(cits)} citations! "
                         f"Auto-saved → `{saved_to}`"
                     )
                 else:
-                    prog.progress(100, text="Failed")
-                    status.error(
-                        "Could not fetch any citations. "
-                        "Semantic Scholar may be temporarily unavailable. "
-                        "Wait 60 seconds and try again."
-                    )
-
+                    prog.progress(100, text="No matches")
+                    status.warning("No matches found. Try re-running agents.")
             except Exception as e:
-                prog.progress(100, text="Error")
                 status.error(f"Error: {e}")
-
             st.rerun()
 
-        # ══════════════════════════════════════════════════════
-        # RESULTS — shown once citations are fetched
-        # ══════════════════════════════════════════════════════
         if st.session_state.citations:
-            citations = st.session_state.citations
-
-            # ── Metrics ───────────────────────────────────────
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Total Papers",   len(citations))
-            m2.metric("With DOI",       sum(1 for c in citations if c.get("doi")))
-            m3.metric("On arXiv",       sum(1 for c in citations if c.get("arxiv")))
-            m4.metric("Conf / Journal", 
-                f"{sum(1 for c in citations if '@inproceedings' in c.get('bibtex',''))} / "
-                f"{sum(1 for c in citations if '@article' in c.get('bibtex',''))}"
-            )
-
+            cits = st.session_state.citations
+            m1,m2,m3,m4 = st.columns(4)
+            m1.metric("Papers", len(cits))
+            m2.metric("With DOI",  sum(1 for c in cits if c.get("doi")))
+            m3.metric("On arXiv",  sum(1 for c in cits if c.get("arxiv")))
+            m4.metric("Conf/Jour",
+                f"{sum(1 for c in cits if '@inproceedings' in c.get('bibtex',''))}"
+                f"/{sum(1 for c in cits if '@article' in c.get('bibtex',''))}")
             st.markdown("---")
 
-            # ── Full .bib file block ───────────────────────────
-            st.markdown("#### 📄 Full `.bib` File")
-            st.markdown(
-                "<div style='font-size:.82rem;color:#8B949E;margin-bottom:.4rem'>"
-                "Copy everything below and paste into Overleaf, "
-                "or use the download button.</div>",
-                unsafe_allow_html=True
-            )
-
-            # The big text area — easy select-all copy
-            st.text_area(
-                label="references.bib — select all (Ctrl+A) and copy:",
-                value=st.session_state.bib_file,
-                height=320,
-                key="bib_main_textarea",
-                label_visibility="visible",
-            )
-
-            dl1, dl2 = st.columns(2)
-            with dl1:
-                st.download_button(
-                    "⬇️ Download references.bib",
+            with st.expander("📄 Full .bib file — copy or download", expanded=False):
+                st.text_area("Select all (Ctrl+A):",
+                             value=st.session_state.bib_file, height=300,
+                             key="bib_full")
+                st.download_button("⬇️ Download references.bib",
                     data=st.session_state.bib_file,
                     file_name=f"references_{current_topic[:20].replace(' ','_')}.bib",
-                    mime="text/plain",
-                    use_container_width=True,
-                    key="dl_bib_main2",
-                )
-            with dl2:
-                if st.button("🔄 Re-fetch citations", key="refetch_btn",
-                             use_container_width=True):
-                    st.session_state.citations = []
-                    st.session_state.bib_file  = ""
-                    st.rerun()
+                    mime="text/plain", key="dl_bib_exp")
 
-            st.markdown("---")
-
-            # ── Individual citation cards ─────────────────────
-            st.markdown(f"#### Individual Entries ({len(citations)} papers)")
-
-            for i, cit in enumerate(citations, 1):
-                title  = cit.get("title","Unknown")
-                auths  = cit.get("authors",[])
+            st.markdown(f"#### {len(cits)} Individual Citations")
+            for i, cit in enumerate(cits, 1):
+                key    = cit.get("cite_key", f"paper{i}")
+                title  = cit.get("title","")
+                auths  = ", ".join(cit.get("authors",[])[:2])
+                if len(cit.get("authors",[])) > 2: auths += " et al."
                 year   = cit.get("year","")
-                venue  = cit.get("venue","")
                 doi    = cit.get("doi","")
                 arxiv  = cit.get("arxiv","")
-                url    = cit.get("url","")
-                key    = cit.get("cite_key",f"paper{i}")
-                cites  = cit.get("citation_count",0)
                 bibtex = cit.get("bibtex","")
-                icon   = "🏛️" if "@inproceedings" in bibtex else "📰"
-
-                auth_str = ", ".join(auths[:3]) + (" et al." if len(auths)>3 else "")
-
-                links = []
-                if doi:
-                    links.append(f'<a href="https://doi.org/{doi}" target="_blank" '
-                        f'style="color:#58A6FF;font-size:.76rem">🔗 DOI</a>')
-                if arxiv:
-                    links.append(f'<a href="https://arxiv.org/abs/{arxiv}" target="_blank" '
-                        f'style="color:#58A6FF;font-size:.76rem">📋 arXiv</a>')
-                if url and not doi and not arxiv:
-                    links.append(f'<a href="{url}" target="_blank" '
-                        f'style="color:#58A6FF;font-size:.76rem">🔗 Paper</a>')
-
-                st.markdown(f"""
-                <div style="background:#161B22;border:1px solid #30363D;
-                border-left:3px solid #1F6FEB;border-radius:0 8px 8px 0;
-                padding:.85rem 1.1rem;margin:.35rem 0">
-                    <div style="font-weight:600;color:#E6EDF3;font-size:.9rem;
-                    margin-bottom:.2rem">{icon} {i}. {title}</div>
-                    <div style="color:#8B949E;font-size:.76rem;margin-bottom:.3rem">
-                        {auth_str}
-                        {"· <b style='color:#C9D1D9'>" + str(year) + "</b>" if year else ""}
-                        {" · " + venue[:55] if venue else ""}
-                        {" · " + str(cites) + " citations" if cites else ""}
-                    </div>
-                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                        <code style="background:#1F3A5F;color:#79C0FF;padding:2px 9px;
-                        border-radius:4px;font-size:.76rem">\\cite{{{key}}}</code>
-                        {"  ".join(links)}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                with st.expander(f"BibTeX  \\cite{{{key}}}", expanded=False):
+                links  = []
+                if doi:   links.append(f'<a href="https://doi.org/{doi}" target="_blank" style="color:#58A6FF;font-size:.75rem">DOI</a>')
+                if arxiv: links.append(f'<a href="https://arxiv.org/abs/{arxiv}" target="_blank" style="color:#58A6FF;font-size:.75rem">arXiv</a>')
+                st.markdown(
+                    f"<div style='background:#161B22;border:1px solid #30363D;"
+                    f"border-left:3px solid #1F6FEB;border-radius:0 8px 8px 0;"
+                    f"padding:.8rem 1.1rem;margin:.3rem 0'>"
+                    f"<b style='color:#E6EDF3'>{i}. {title}</b><br>"
+                    f"<span style='color:#8B949E;font-size:.76rem'>{auths} · {year}</span><br>"
+                    f"<code style='background:#1F3A5F;color:#79C0FF;padding:1px 8px;"
+                    f"border-radius:4px;font-size:.75rem'>\\cite{{{key}}}</code>"
+                    f"{'  ' + '  '.join(links) if links else ''}"
+                    f"</div>", unsafe_allow_html=True
+                )
+                with st.expander(f"BibTeX [{key}]", expanded=False):
                     st.code(bibtex, language="bibtex")
-                    st.text_area(
-                        "Copy:", value=bibtex, height=160,
-                        key=f"bib_ta_{i}", label_visibility="visible"
-                    )
-                    st.download_button(
-                        f"⬇️ {key}.bib",
-                        data=bibtex,
-                        file_name=f"{key}.bib",
-                        mime="text/plain",
-                        key=f"dl_single_{i}",
-                    )
+                    st.download_button(f"⬇️ {key}.bib", data=bibtex,
+                        file_name=f"{key}.bib", mime="text/plain",
+                        key=f"dl_s_{i}")
 
-            # ── Overleaf guide ────────────────────────────────
             st.markdown("---")
             st.markdown("""
-            <div style="background:#161B22;border:1px solid #30363D;border-radius:10px;
-            padding:1.1rem 1.3rem">
-              <div style="font-weight:600;color:#E6EDF3;margin-bottom:.7rem">
-              📎 How to use in Overleaf
-              </div>
-              <div style="font-size:.84rem;color:#C9D1D9;line-height:2.1">
-              <b style="color:#D29922">1.</b> Download <code>references.bib</code>
-              (button above)<br>
-              <b style="color:#D29922">2.</b> Overleaf → <b>Upload</b> →
-              select <code>references.bib</code><br>
-              <b style="color:#D29922">3.</b> Add before
-              <code>\\end{document}</code>:<br>
-              &nbsp;&nbsp;&nbsp;
-              <code style="color:#79C0FF">\\bibliographystyle{ieeetr}</code><br>
-              &nbsp;&nbsp;&nbsp;
-              <code style="color:#79C0FF">\\bibliography{references}</code><br>
-              <b style="color:#D29922">4.</b> In your text:
-              <code style="color:#79C0FF">\\cite{He2016Deep}</code> or
-              <code style="color:#79C0FF">\\cite{key1,key2,key3}</code><br>
-              <b style="color:#D29922">5.</b> Compile twice → references appear ✅
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            
-# streamlit run app.py
+            <div style="background:#161B22;border:0.5px solid #30363D;
+            border-radius:8px;padding:1rem 1.2rem;font-size:.84rem">
+            <b style="color:#E6EDF3">📎 Overleaf in 3 steps:</b><br>
+            <b style="color:#D29922">1.</b> Download <code>references.bib</code> above<br>
+            <b style="color:#D29922">2.</b> Overleaf → Upload → select the .bib file<br>
+            <b style="color:#D29922">3.</b> Add before <code>\\end{document}</code>:
+            <code style="color:#79C0FF">\\bibliographystyle{ieeetr}</code>
+            <code style="color:#79C0FF">\\bibliography{references}</code>
+            </div>""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# TAB 12 — FACULTY MATCH
+# ══════════════════════════════════════════════════════════════
+with tab_faculty:
+    st.markdown("### 👨‍🏫 Faculty Match")
+    st.markdown("""
+    <div style="background:#0A1628;border:1px solid #1F6FEB;border-radius:8px;
+    padding:.8rem 1rem;font-size:.84rem;color:#58A6FF;margin-bottom:1rem">
+    Find the right Katz School professor for your research topic.
+    Matched by expertise keywords and research focus.
+    </div>""", unsafe_allow_html=True)
+
+    fac_topic = st.text_input(
+        "Search by topic or faculty name",
+        value=st.session_state.topic or topic,
+        key="fac_search",
+        placeholder="e.g. deep learning, cybersecurity, Prof. Wang…",
+    )
+
+    if fac_topic:
+        from katzbot.faculty import match_faculty, KATZ_FACULTY
+        matches = match_faculty(fac_topic, top_k=5)
+
+        if matches:
+            st.markdown(f"#### Top {len(matches)} matches for '{fac_topic}'")
+            for f in matches:
+                exp = ", ".join(f["expertise"][:5])
+                courses = ", ".join(f.get("courses",[])[:3])
+                st.markdown(
+                    f"<div style='background:#161B22;border:0.5px solid #30363D;"
+                    f"border-left:4px solid #58A6FF;border-radius:0 10px 10px 0;"
+                    f"padding:1rem 1.2rem;margin:.5rem 0'>"
+                    f"<div style='font-size:.95rem;font-weight:600;color:#E6EDF3'>"
+                    f"{f['name']}</div>"
+                    f"<div style='color:#8B949E;font-size:.78rem;margin:.15rem 0'>"
+                    f"{f['title']}</div>"
+                    f"<div style='color:#8B949E;font-size:.78rem;margin-bottom:.3rem'>"
+                    f"🏛 {f['dept']}</div>"
+                    f"<div style='color:#C9D1D9;font-size:.8rem;margin-bottom:.3rem'>"
+                    f"<b>Expertise:</b> {exp}</div>"
+                    f"{('<div style=\"color:#C9D1D9;font-size:.8rem;margin-bottom:.3rem\"><b>Courses:</b> ' + courses + '</div>') if courses else ''}"
+                    f"<div style='color:#8B949E;font-size:.77rem;font-style:italic;"
+                    f"margin-bottom:.4rem'>{f['note']}</div>"
+                    f"<a href='mailto:{f['email']}' style='color:#58A6FF;font-size:.82rem'>"
+                    f"✉ {f['email']}</a>"
+                    f" &nbsp;·&nbsp; "
+                    f"<a href='{f['profile']}' target='_blank' "
+                    f"style='color:#58A6FF;font-size:.82rem'>Profile →</a>"
+                    f"</div>", unsafe_allow_html=True
+                )
+        else:
+            st.info("No faculty matched. Try different keywords.")
+            st.markdown("**All Katz Faculty:**")
+            from katzbot.faculty import KATZ_FACULTY
+            for f in KATZ_FACULTY:
+                st.markdown(
+                    f"• **{f['name']}** ({f['dept']}) — "
+                    f"[{f['email']}](mailto:{f['email']})"
+                )

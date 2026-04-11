@@ -1,68 +1,48 @@
-# 🔬 PaperMind — Katz School AI Research Platform
+# 🔬 ScholarMind: Research Intelligence Platform
 
-> Multi-agent AI that reads 20+ papers, maps relationships, finds gaps,
-> writes your literature review, and connects you with the right Katz professor.
-> Powered by **Groq (FREE)** or OpenAI.
-
-Built for **Katz School Ideathon 2026** × Google Developer Groups.
+> **Yeshiva University · Katz School of Science and Health**  
+> Katz School CS & AI Club Ideathon 2026 · Sponsored by Google Developer Groups
 
 ---
 
-## 🐛 Bugs Fixed in This Version
+## What is ScholarMind?
 
-### Fix 1 — `GroqException: Failed to call a function`
-**Root cause:** CrewAI passes tool/function-call JSON schemas to all agents. Groq's 
-Llama models reject malformed schemas. LiteLLM was also not receiving the `GROQ_API_KEY` 
-reliably before the crew started.
+ScholarMind is a complete AI-powered academic research platform that takes a research topic and delivers:
 
-**Fixes applied:**
-- Only the **Crawler agent** gets tools (the only one that actually calls Semantic Scholar)
-- All other 5 agents have `tools=[]` — they read context passed from previous tasks
-- `allow_delegation=False` on all agents prevents extra tool-calling attempts
-- `crew.py` explicitly sets `os.environ["GROQ_API_KEY"]` before `crew.kickoff()`
-- `memory=False` and `embedder=None` in Crew config prevents Groq embeddings API calls
-- `max_iter=3` caps retry loops when Groq rate-limits
-
-### Fix 2 — `No module named 'langchain_chroma'`
-**Root cause:** `langchain-chroma` is a newer standalone package that may not be 
-installed despite being in requirements.
-
-**Fix applied:**
-```python
-# katzbot/rag_engine.py now does:
-try:
-    from langchain_chroma import Chroma
-except ImportError:
-    from langchain_community.vectorstores import Chroma  # fallback
-```
-This works with any langchain version.
+- **Verified literature review** — cited, academic prose, ready to submit
+- **Exact BibTeX citations** — from Semantic Scholar API, paste into Overleaf
+- **Research gap analysis** — 3 ranked gaps with feasibility scores
+- **Faculty matching** — which Katz professor to email, with their actual email
+- **Live campus events** — relevant seminars and workshops from yu.edu/katz
+- **Smart Advisor** — connects gap → faculty → event → email template in one click
+- **KatzBot RAG** — trained on the real Katz School website, persisted to disk
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 ### 1. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Get your FREE Groq API key
-Go to **https://console.groq.com** → Sign up → API Keys → Create Key  
+### 2. Get a FREE Groq API key
+Visit **https://console.groq.com** → Sign up → API Keys → Create Key  
 Key starts with `gsk_`
 
-### 3. Create .env file
+### 3. Configure
 ```bash
 cp .env.example .env
-```
-Edit `.env`:
-```
-LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_your_key_here
-MODEL_NAME=llama-3.3-70b-versatile
-OPENAI_API_KEY=          # optional — leave blank to use free embeddings
+# Edit .env and add your GROQ_API_KEY
 ```
 
-### 4. Run
+### 4. Pre-build KatzBot index (optional but recommended)
+```bash
+python katzbot/build_index.py --refresh --test
+```
+This takes ~5 minutes on first run. Subsequent starts load from disk in ~2 seconds.
+
+### 5. Run
 ```bash
 streamlit run app.py
 ```
@@ -70,65 +50,87 @@ Opens at **http://localhost:8501**
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```
-papermind/
-├── app.py                  ← Run this (Streamlit UI)
-├── crew.py                 ← Agent orchestrator (FIXED)
-├── chatbot.py              ← PaperBot chat
-├── llm_config.py           ← Groq/OpenAI switcher (FIXED)
-├── .env.example            ← Copy to .env
-├── requirements.txt        ← Updated dependencies
+scholarmind/
+├── app.py                      ← Main Streamlit UI (12 tabs)
+├── crew.py                     ← 6-agent pipeline orchestrator
+├── chatbot.py                  ← PaperBot direct chat
+├── llm_config.py               ← Groq/OpenAI configuration
+├── requirements.txt
+├── .env.example                ← Copy to .env
+│
 ├── agents/
-│   ├── __init__.py
-│   ├── research_agents.py  ← Agent definitions (FIXED — tools only on Crawler)
-│   └── tasks.py            ← Task definitions (FIXED — context chaining)
+│   ├── research_agents.py      ← 6 CrewAI agents
+│   └── tasks.py                ← Task definitions
+│
 ├── tools/
-│   ├── __init__.py
-│   └── semantic_scholar.py ← Search tool (FIXED — simple string signature)
+│   ├── semantic_scholar.py     ← Paper search tool
+│   └── citation_fetcher.py     ← BibTeX generation
+│
 └── katzbot/
     ├── __init__.py
-    ├── rag_engine.py       ← RAG pipeline (FIXED — langchain_chroma fallback)
-    └── chroma_index/       ← Auto-created on first KatzBot use
+    ├── build_index.py           ← CLI: build FAISS index
+    ├── crawler.py               ← Web crawler (sitemap + parallel)
+    ├── indexer.py               ← FAISS builder + persistence
+    ├── chain.py                 ← RAG chain (version-safe)
+    ├── rag_engine.py            ← Main engine (auto-build)
+    ├── faculty.py               ← Faculty database (10 professors)
+    ├── events_fetcher.py        ← Live events from yu.edu/katz
+    └── smart_advisor.py         ← Gap → Faculty → Event → Email
 ```
 
 ---
 
-## 🤖 Groq Model Recommendations
+## KatzBot Persistence
 
-| Model | Speed | Best For |
-|-------|-------|----------|
-| `llama-3.3-70b-versatile` | 280 t/s | **Recommended** — best quality |
-| `llama-3.1-8b-instant` | 560 t/s | If hitting rate limits — fastest |
-| `openai/gpt-oss-120b` | 500 t/s | GPT-quality output on Groq |
-| `qwen/qwen3-32b` | 400 t/s | Strong reasoning tasks |
+On first run, KatzBot:
+1. Parses `yu.edu/sitemap.xml` (original notebook found 1,262 URLs)
+2. Filters and fetches Katz pages in parallel (8 workers)
+3. Loads QA dataset from GitHub (key to original ROUGE-1 F1=0.367)
+4. Injects all 10 faculty as structured documents
+5. Builds FAISS index → saved to `katzbot/faiss_index/`
+6. Saves retriever → `katzbot/retriever_store.pkl`
 
-**Rate limits on free Groq tier:**
-- llama-3.3-70b: 300K tokens/min, 1K req/min
-- llama-3.1-8b: 250K tokens/min, 14,400 req/day
+**Subsequent runs**: loads from disk in ~2 seconds. No rebuild needed.
 
-If you get a rate limit error → switch to `llama-3.1-8b-instant` in the sidebar.
-
----
-
-## 🎓 KatzBot First-Time Setup
-
-1. Click **🎓 KatzBot** tab
-2. Click **"Build / Refresh Index"**
-3. Wait ~5 minutes (crawls ~60 Katz pages, saved to disk)
-4. All future runs load instantly from the cached index
+To force rebuild:
+```bash
+python katzbot/build_index.py --refresh
+```
 
 ---
 
-## 🚨 Troubleshooting
+## Groq Free Tier — Model Recommendations
 
-| Error | Fix |
-|-------|-----|
-| `GroqException: Failed to call a function` | Fixed in this version — update your files |
-| `No module named 'langchain_chroma'` | Fixed in this version — auto-fallback to community |
-| `GROQ_API_KEY not found` | Check `.env` file — key must start with `gsk_` |
-| `Rate limit exceeded` | Switch to `llama-3.1-8b-instant` in sidebar |
-| `Module not found: langchain_groq` | `pip install langchain-groq --upgrade` |
-| `KatzBot build fails` | `pip install beautifulsoup4 lxml chromadb --upgrade` |
-| Agents produce empty output | Try `llama-3.1-8b-instant` (more daily quota) |
+| Model | TPM | Recommended? |
+|-------|-----|-------------|
+| `llama-3.1-8b-instant` | 250,000 | ✅ **Default — always works** |
+| `llama-3.3-70b-versatile` | 12,000 | ⚠️ May rate-limit |
+| `qwen/qwen3-32b` | 6,000 | ❌ Avoid with 6 agents |
+
+---
+
+## Why ScholarMind Beats ChatGPT, Elicit, and Perplexity
+
+| Feature | ChatGPT | Elicit | ScholarMind |
+|---------|---------|--------|-------------|
+| Verified citations (no hallucinations) | ❌ | ✅ partial | ✅ Semantic Scholar API |
+| 6-agent specialised pipeline | ❌ | ❌ | ✅ |
+| Institution-specific RAG | ❌ | ❌ | ✅ Katz School |
+| Faculty matching with emails | ❌ | ❌ | ✅ |
+| Live campus events integration | ❌ | ❌ | ✅ |
+| Complete workflow (paper→gap→email) | ❌ | ❌ | ✅ |
+| Cost | Paid | Paid | **$0** |
+
+---
+
+## Project Title Origin
+
+**ScholarMind** reflects the three pillars:
+- **Scholar** — academic research, literature, citations
+- **Mind** — AI intelligence, agent reasoning, knowledge synthesis
+- The combination → an AI that thinks like a scholar
+
+*Alternative names considered: AcademIQ, ResearchNexus, KatzScholar, MindMap Research*

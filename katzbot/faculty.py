@@ -1,11 +1,11 @@
 """
 katzbot/faculty.py
 ===================
-Katz School faculty database + matching utilities.
-Faculty are injected as Documents into the FAISS index so KatzBot
-can answer "who is X" questions even when the website doesn't load.
+Katz School faculty database.
+Injected into FAISS index so KatzBot answers faculty questions
+even without live website access.
 
-Also used by the Faculty Match tab in app.py.
+Data source: yu.edu/katz/faculty (verified April 2026)
 """
 
 try:
@@ -14,20 +14,19 @@ except ImportError:
     from langchain.schema import Document
 
 
-# ── Katz Faculty Database ──────────────────────────────────────
-# Source: yu.edu/katz/faculty (curated April 2026)
 KATZ_FACULTY = [
     {
         "name":      "Prof. Honggang Wang",
-        "title":     "Professor & Chair, Computer Science",
+        "title":     "Professor & Chair, Computer Science and Engineering",
         "dept":      "Computer Science & Engineering",
         "email":     "hwang@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/honggang-wang",
         "expertise": ["computer networks", "wireless communications", "IoT",
-                      "multimedia systems", "cybersecurity", "machine learning",
-                      "5G", "network security"],
-        "note":      "Department Chair of CS — contact for program structure and research.",
+                      "multimedia systems", "network security", "machine learning",
+                      "5G networks", "cybersecurity"],
         "courses":   ["Computer Networks", "Wireless Systems", "IoT Security"],
+        "note":      "Department Chair of CS&E. Contact for program structure, "
+                     "PhD admissions, and research collaboration in networking/IoT.",
     },
     {
         "name":      "Prof. David Leidner",
@@ -37,8 +36,9 @@ KATZ_FACULTY = [
         "profile":   "https://www.yu.edu/katz/about/dean",
         "expertise": ["information systems", "knowledge management", "AI ethics",
                       "technology leadership", "digital transformation"],
-        "note":      "Dean of the Katz School — oversees all programs and strategic direction.",
         "courses":   [],
+        "note":      "Dean of the Katz School. Contact for strategic and "
+                     "administrative matters.",
     },
     {
         "name":      "Prof. Barry Burd",
@@ -46,11 +46,12 @@ KATZ_FACULTY = [
         "dept":      "Computer Science & Engineering",
         "email":     "bburd@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/barry-burd",
-        "expertise": ["software engineering", "Java", "Android development",
+        "expertise": ["software engineering", "Java programming", "Android development",
                       "programming languages", "computer science education",
                       "mobile development"],
-        "note":      "Author of 'Java For Dummies' and Android textbooks. Great mentor for software projects.",
         "courses":   ["Software Engineering", "Mobile Development", "Java Programming"],
+        "note":      "Author of 'Java For Dummies' series. Great mentor for "
+                     "software engineering and mobile app projects.",
     },
     {
         "name":      "Prof. Mark Hillery",
@@ -59,9 +60,10 @@ KATZ_FACULTY = [
         "email":     "mhillery@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/mark-hillery",
         "expertise": ["quantum computing", "quantum information", "quantum cryptography",
-                      "theoretical physics", "quantum algorithms", "entanglement"],
-        "note":      "World-leading quantum computing researcher with 200+ publications.",
+                      "theoretical physics", "quantum algorithms"],
         "courses":   ["Quantum Computing", "Quantum Information Theory"],
+        "note":      "World-leading quantum computing researcher, 200+ publications. "
+                     "Best contact for quantum AI/ML research projects.",
     },
     {
         "name":      "Prof. Mordechai Guri",
@@ -70,10 +72,10 @@ KATZ_FACULTY = [
         "email":     "mguri@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/mordechai-guri",
         "expertise": ["cybersecurity", "air-gap attacks", "hardware security",
-                      "side-channel attacks", "malware", "covert channels",
-                      "electromagnetic attacks", "acoustic attacks"],
-        "note":      "Known globally for air-gap attack research. Multiple viral security demos.",
+                      "side-channel attacks", "malware analysis", "covert channels"],
         "courses":   ["Cybersecurity", "Hardware Security", "Malware Analysis"],
+        "note":      "Globally known for air-gap attack research. Contact for "
+                     "hardware security, malware, and offensive security research.",
     },
     {
         "name":      "Prof. Reza Curtmola",
@@ -81,11 +83,11 @@ KATZ_FACULTY = [
         "dept":      "Cybersecurity",
         "email":     "rcurtmola@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/reza-curtmola",
-        "expertise": ["cybersecurity", "cryptography", "network security",
-                      "cloud security", "privacy", "applied cryptography",
-                      "searchable encryption", "provable security"],
-        "note":      "Expert in applied cryptography and cloud data security.",
+        "expertise": ["cybersecurity", "applied cryptography", "network security",
+                      "cloud security", "data privacy", "searchable encryption"],
         "courses":   ["Applied Cryptography", "Network Security", "Cloud Security"],
+        "note":      "Expert in applied cryptography and cloud data security. "
+                     "Contact for cryptography or cloud security research.",
     },
     {
         "name":      "Prof. Charles Ying",
@@ -93,23 +95,25 @@ KATZ_FACULTY = [
         "dept":      "Computer Science & Engineering",
         "email":     "cying@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/charles-ying",
-        "expertise": ["natural language processing", "text mining", "information retrieval",
-                      "machine learning", "large language models", "AI",
-                      "computational linguistics"],
-        "note":      "NLP and LLM specialist — excellent supervisor for text/language AI projects.",
+        "expertise": ["natural language processing", "text mining",
+                      "information retrieval", "machine learning",
+                      "large language models", "computational linguistics"],
         "courses":   ["Natural Language Processing", "Machine Learning", "AI"],
+        "note":      "NLP and LLM specialist. Best contact for text-based AI "
+                     "and language model research projects.",
     },
     {
         "name":      "Prof. Shira Scheindlin",
-        "title":     "Associate Professor, Data Analytics",
+        "title":     "Associate Professor, Data Analytics & Visualization",
         "dept":      "Data Analytics & Visualization",
         "email":     "sscheindlin@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/shira-scheindlin",
         "expertise": ["data analytics", "data visualization", "statistics",
-                      "business intelligence", "data science", "R", "Tableau",
-                      "predictive analytics"],
-        "note":      "Program lead for Data Analytics — strong industry connections.",
-        "courses":   ["Data Visualization", "Predictive Analytics", "Business Intelligence"],
+                      "business intelligence", "predictive analytics", "R", "Tableau"],
+        "courses":   ["Data Visualization", "Predictive Analytics",
+                      "Business Intelligence"],
+        "note":      "Program lead for Data Analytics. Strong industry connections. "
+                     "Contact for data science or visualization projects.",
     },
     {
         "name":      "Prof. Nelly Levin",
@@ -117,11 +121,12 @@ KATZ_FACULTY = [
         "dept":      "Mathematical Sciences",
         "email":     "nlevin@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/nelly-levin",
-        "expertise": ["mathematics", "statistics", "probability",
-                      "mathematical modeling", "optimization", "analysis",
+        "expertise": ["mathematics", "statistics", "probability theory",
+                      "mathematical modeling", "optimization",
                       "differential equations"],
-        "note":      "Specialises in mathematical modelling and statistical methods.",
         "courses":   ["Mathematical Modeling", "Statistics", "Optimization"],
+        "note":      "Specialist in mathematical modelling and statistical methods. "
+                     "Contact for math-heavy AI or optimization research.",
     },
     {
         "name":      "Prof. David Alves",
@@ -129,19 +134,20 @@ KATZ_FACULTY = [
         "dept":      "M.S. in Artificial Intelligence",
         "email":     "dalves@yu.edu",
         "profile":   "https://www.yu.edu/katz/faculty/david-alves",
-        "expertise": ["artificial intelligence", "machine learning", "neural networks",
-                      "deep learning", "computer vision", "reinforcement learning",
-                      "AI applications"],
-        "note":      "Program director for the M.S. in AI. First contact for AI admissions.",
+        "expertise": ["artificial intelligence", "machine learning", "deep learning",
+                      "neural networks", "computer vision",
+                      "reinforcement learning"],
         "courses":   ["Machine Learning", "Deep Learning", "AI Capstone"],
+        "note":      "Program Director for M.S. in AI. First contact for AI program "
+                     "admissions and AI/ML research supervision.",
     },
 ]
 
 
 def match_faculty(topic: str, top_k: int = 3) -> list:
     """
-    Match faculty to a topic using keyword scoring.
-    Also does direct name matching (e.g. 'who is Honggang Wang').
+    Match faculty to a topic using keyword + name scoring.
+    Returns top_k most relevant faculty members.
     """
     topic_lower = topic.lower()
     scored = []
@@ -149,22 +155,24 @@ def match_faculty(topic: str, top_k: int = 3) -> list:
     for f in KATZ_FACULTY:
         score = 0
 
-        # Direct name match (high priority)
+        # Direct name match — highest priority
         last_name = f["name"].lower().split()[-1]
-        full_name = f["name"].lower().replace("prof. ", "")
-        if last_name in topic_lower or full_name in topic_lower:
+        full_lower = f["name"].lower().replace("prof. ", "")
+        if last_name in topic_lower:
+            score += 25
+        elif full_lower in topic_lower:
             score += 20
 
         # Expertise keyword match
         for kw in f["expertise"]:
-            if kw.lower() in topic_lower:
-                score += 3
-            elif any(word in kw.lower() for word in topic_lower.split() if len(word) > 3):
+            kw_lower = kw.lower()
+            if kw_lower in topic_lower:
+                score += 4
+            elif any(w in kw_lower for w in topic_lower.split() if len(w) > 3):
                 score += 1
 
         # Department match
-        dept_words = f["dept"].lower().split()
-        for word in dept_words:
+        for word in f["dept"].lower().split():
             if len(word) > 4 and word in topic_lower:
                 score += 2
 
@@ -178,13 +186,13 @@ def match_faculty(topic: str, top_k: int = 3) -> list:
 def get_faculty_documents() -> list:
     """
     Convert faculty records to LangChain Documents for FAISS indexing.
-    This ensures KatzBot can answer faculty questions even without website access.
+    Each faculty member gets their own document for precise retrieval.
     """
     docs = []
+
     for f in KATZ_FACULTY:
-        # Rich text representation for good embedding recall
         text = (
-            f"Faculty Profile:\n"
+            f"FACULTY PROFILE\n"
             f"Name: {f['name']}\n"
             f"Title: {f['title']}\n"
             f"Department: {f['dept']}\n"
@@ -192,32 +200,36 @@ def get_faculty_documents() -> list:
             f"Profile URL: {f['profile']}\n"
             f"Research Expertise: {', '.join(f['expertise'])}\n"
             f"Courses Taught: {', '.join(f.get('courses', []))}\n"
-            f"Research Focus: {f['note']}\n"
-            f"\nTo contact {f['name'].replace('Prof. ', '')}, "
-            f"email {f['email']} or visit {f['profile']}\n"
+            f"About: {f['note']}\n"
+            f"\nTo contact {f['name']}, email {f['email']} "
+            f"or visit {f['profile']}\n"
         )
         docs.append(Document(
             page_content=text,
             metadata={
-                "source": f["profile"],
-                "title":  f["name"],
-                "type":   "faculty",
-                "dept":   f["dept"],
-                "email":  f["email"],
+                "source":   f["profile"],
+                "title":    f["name"],
+                "type":     "faculty",
+                "dept":     f["dept"],
+                "email":    f["email"],
             },
         ))
 
-    # Also add a summary document listing all faculty
-    summary = "Katz School Faculty List:\n\n"
+    # Faculty directory summary document
+    summary_lines = ["KATZ SCHOOL FACULTY DIRECTORY\n"]
     for f in KATZ_FACULTY:
-        summary += (
-            f"• {f['name']} ({f['dept']}) — "
-            f"{f['email']} — {', '.join(f['expertise'][:3])}\n"
+        summary_lines.append(
+            f"• {f['name']} | {f['title']} | {f['email']}\n"
+            f"  Expertise: {', '.join(f['expertise'][:4])}\n"
         )
     docs.append(Document(
-        page_content=summary,
-        metadata={"source": "https://www.yu.edu/katz/faculty", "title": "Faculty Directory"},
+        page_content="\n".join(summary_lines),
+        metadata={
+            "source": "https://www.yu.edu/katz/faculty",
+            "title":  "Katz Faculty Directory",
+            "type":   "faculty_directory",
+        },
     ))
 
-    print(f"[Faculty] Generated {len(docs)} faculty documents")
+    print(f"[Faculty] Created {len(docs)} faculty documents")
     return docs

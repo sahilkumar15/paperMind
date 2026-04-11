@@ -1,0 +1,35 @@
+rename study plan to research plan
+
+comparision with existing solution
+
+highlighting novel features
+
+katzbot to move to menu
+
+presentation slide- tech stack
+
+flow chart diagram
+
+
+Judging Criteria
+Problem Definition – 15 Points
+• Clarity of the problem • Importance and relevance • Understanding of the challenge
+Innovation & Originality – 20 Points
+• Creativity of the idea • Uniqueness of the concept
+Technological Usage & Feasibility – 20 Points
+• Practicality of the solution • Feasibility of implementation
+Benefits / Value Analysis – 15 Points
+• Impact of the solution • Value creation • Cost-based evaluation
+Execution & Prototype – 15 Points
+• Quality of implementation • Prototype or Proof of Concept (if available)
+Presentation – 15 Points
+• Clarity of communication • Confidence and explanation of the idea
+
+counter for this to improve this criteria in all perspective
+
+
+possiblity of using google scholar
+
+
+
+
