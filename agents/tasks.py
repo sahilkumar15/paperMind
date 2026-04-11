@@ -1,8 +1,8 @@
 """
 agents/tasks.py
-================
-Token-efficient tasks for Groq free tier.
-Each task output is capped to stay under TPM limits.
+===============
+Tasks for KatzScholarMind.
+Search is already completed in Python before these tasks run.
 """
 
 from crewai import Task
@@ -11,61 +11,63 @@ from agents.research_agents import make_agents
 
 def build_research_tasks(
     topic: str,
+    papers_context: str,
     research_question: str = "",
     days: int = 7,
     hours_per_day: float = 3.0,
     include_planner: bool = True,
 ) -> tuple:
-    agents     = make_agents(include_planner=include_planner)
-    crawler    = agents[0]
-    reader     = agents[1]
-    mapper     = agents[2]
+    agents = make_agents(include_planner=include_planner)
+    curator = agents[0]
+    reader = agents[1]
+    mapper = agents[2]
     gap_finder = agents[3]
-    writer     = agents[4]
-    planner    = agents[5] if include_planner and len(agents) > 5 else None
+    writer = agents[4]
+    planner = agents[5] if include_planner and len(agents) > 5 else None
 
     rq = f" Research question: {research_question}." if research_question else ""
 
-    task_crawl = Task(
+    task_curate = Task(
         description=(
-            f"Search Semantic Scholar for: '{topic}'.{rq}\n"
-            f"Use the semantic_scholar_search tool.\n"
-            f"Return a numbered list (10-15 papers):\n"
-            f"[N]. Title (Year) — Authors — Citations: X\n"
+            f"Topic: '{topic}'.{rq}\n"
+            f"The candidate papers below were already retrieved from Semantic Scholar and/or arXiv.\n"
+            f"Do NOT invent or browse for new papers.\n\n"
+            f"Candidate papers:\n{papers_context}\n\n"
+            f"Select the 10-12 most relevant papers and rewrite them as a numbered list in this format:\n"
+            f"[N]. Title (Year) — Authors — Citations: X — Source: Semantic Scholar/arXiv\n"
             f"Summary: one sentence. URL: ...\n"
-            f"Total output: under 500 words."
+            f"Stay under 650 words."
         ),
         expected_output=(
-            "Numbered list of 10-15 papers with title, year, authors, "
-            "citations, 1-sentence summary, URL. Under 500 words."
+            "A clean numbered list of the best 10-12 papers with title, year, authors, citations, source, summary, and URL."
         ),
-        agent=crawler,
+        agent=curator,
     )
 
     task_read = Task(
         description=(
-            f"Papers on '{topic}' are listed above.\n"
-            f"For each paper write ONE paragraph (2-3 sentences):\n"
-            f"Claim: ... Method: ... Finding: ...\n"
-            f"Total output: under 500 words."
+            f"Using only the curated paper list for '{topic}', write one short paragraph per paper.\n"
+            f"Format each as: Claim: ... Method: ... Finding: ...\n"
+            f"Be faithful to the available summaries and do not invent extra details.\n"
+            f"Total output under 700 words."
         ),
         expected_output=(
-            "One short paragraph per paper with claim, method, finding. Under 500 words."
+            "Short claim/method/finding extraction for each paper, grounded in the curated list."
         ),
         agent=reader,
-        context=[task_crawl],
+        context=[task_curate],
     )
 
     task_map = Task(
         description=(
-            f"Based on extractions for '{topic}', write:\n"
-            f"## Agreements\n(2-3 sentences)\n"
-            f"## Contradictions\n(2-3 sentences)\n"
-            f"## Methodological Trends\n(2-3 sentences)\n"
-            f"Total: under 250 words."
+            f"Based on the extractions for '{topic}', write three short sections:\n"
+            f"## Agreements\n"
+            f"## Contradictions\n"
+            f"## Methodological Trends\n"
+            f"Keep the whole answer under 300 words."
         ),
         expected_output=(
-            "Three sections (Agreements, Contradictions, Trends), under 250 words."
+            "Three short sections: Agreements, Contradictions, Methodological Trends."
         ),
         agent=mapper,
         context=[task_read],
@@ -73,49 +75,49 @@ def build_research_tasks(
 
     task_gaps = Task(
         description=(
-            f"Based on papers about '{topic}', list 3 research gaps.{rq}\n"
-            f"Format each:\n"
+            f"Based on the papers about '{topic}', identify exactly 3 research gaps.{rq}\n"
+            f"Format each as:\n"
             f"**Gap [N]: [Name]**\n"
             f"Missing: ... Matters: ... Approach: ...\n"
-            f"Total: under 250 words."
+            f"Keep the whole answer under 280 words."
         ),
         expected_output=(
-            "3 research gaps with name, what is missing, why it matters, "
-            "and suggested approach. Under 250 words."
+            "Exactly 3 research gaps with what is missing, why it matters, and a suggested approach."
         ),
         agent=gap_finder,
-        context=[task_map],
+        context=[task_curate, task_map],
     )
 
     task_litrev = Task(
         description=(
             f"Write a literature review on '{topic}'.{rq}\n"
-            f"400-500 words, academic prose, no bullets.\n"
-            f"Cite as (Author et al., Year).\n"
-            f"Structure: intro → themes → synthesis → gap positioning."
+            f"Length: 400-500 words. Academic prose only, no bullet points.\n"
+            f"Use citations like (Author et al., Year) when possible from the curated list.\n"
+            f"Structure: introduction -> themes -> synthesis -> gap positioning."
         ),
         expected_output=(
-            "400-500 word literature review in academic prose, ending with gaps."
+            "A 400-500 word literature review grounded in the curated papers and ending with gap positioning."
         ),
         agent=writer,
-        context=[task_crawl, task_map, task_gaps],
+        context=[task_curate, task_map, task_gaps],
     )
 
-    tasks = [task_crawl, task_read, task_map, task_gaps, task_litrev]
+    tasks = [task_curate, task_read, task_map, task_gaps, task_litrev]
 
     if include_planner and planner:
         task_plan = Task(
             description=(
-                f"Create a {days}-day study plan for '{topic}'.\n"
-                f"Time: {hours_per_day}h/day.{rq}\n"
+                f"Create a {days}-day research reading plan for '{topic}'.\n"
+                f"Time budget: {hours_per_day} hours/day.{rq}\n"
+                f"Use only papers from the curated list.\n"
                 f"Format: **Day X** — Focus — Papers to read.\n"
-                f"Name actual papers. Under 300 words."
+                f"Keep under 350 words."
             ),
             expected_output=(
-                f"Day-by-day plan for {days} days naming specific papers. Under 300 words."
+                f"A day-by-day {days}-day reading plan naming specific papers from the curated list."
             ),
             agent=planner,
-            context=[task_crawl, task_gaps],
+            context=[task_curate, task_gaps],
         )
         tasks.append(task_plan)
 

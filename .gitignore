@@ -212,3 +212,6 @@ __marimo__/
 katzbot/faiss_index/ 
 katzbot/faiss_index/ 
 katzbot/faiss_index/ 
+katzbot/pages_cache.json 
+katzbot/pages_cache_all.json 
+katzbot/pages_cache*.json 

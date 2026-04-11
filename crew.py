@@ -1,12 +1,14 @@
 """
-crew.py — ScholarMind research orchestrator
-=============================================
-Runs the 6-agent pipeline with retry on Groq rate limits.
+crew.py — KatzScholarMind orchestrator
+======================================
+
+Key fix:
+- Search is deterministic Python now, not LLM tool-calling.
+- This avoids Groq function-call failures such as hallucinated brave_search.
+- Semantic Scholar is primary; arXiv is the free fallback.
 """
 
 import os
-import re
-import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,25 +24,46 @@ def run_papermind(
     from crewai import Crew, Process
     from agents.tasks import build_research_tasks
     from llm_config import get_provider, get_model_name, get_crewai_llm_string
+    from tools.paper_search import search_papers, format_papers_for_display, format_papers_for_prompt
 
     provider = get_provider()
-    model    = get_model_name()
+    model = get_model_name()
+    llm_str = get_crewai_llm_string()
 
-    # Ensure LiteLLM finds the API key
     if provider == "groq":
-        key = os.getenv("GROQ_API_KEY","")
-        if key: os.environ["GROQ_API_KEY"] = key
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        if groq_key:
+            os.environ["GROQ_API_KEY"] = groq_key
     else:
-        key = os.getenv("OPENAI_API_KEY","")
-        if key: os.environ["OPENAI_API_KEY"] = key
+        openai_key = os.getenv("OPENAI_API_KEY", "")
+        if openai_key:
+            os.environ["OPENAI_API_KEY"] = openai_key
 
     print(f"\n{'='*60}")
-    print(f"  KatzScholarMind | {provider.upper()} | {model}")
+    print(f"  KatzScholarMind | Provider: {provider.upper()} | Model: {model}")
+    print(f"  LiteLLM string: {llm_str}")
     print(f"  Topic: {topic}")
     print(f"{'='*60}\n")
 
+    # Deterministic retrieval first.
+    papers = search_papers(topic, max_results=12)
+    papers_display = format_papers_for_display(papers)
+    papers_prompt = format_papers_for_prompt(papers)
+
+    if not papers:
+        return {
+            "papers": papers_display,
+            "extractions": "No papers found.",
+            "map": "No papers found.",
+            "gaps": "No papers found.",
+            "lit_review": "No papers found.",
+            "study_plan": "No papers found." if include_planner else "",
+            "raw": "No papers found from Semantic Scholar or arXiv.",
+        }
+
     agents, tasks = build_research_tasks(
         topic=topic,
+        papers_context=papers_prompt,
         research_question=research_question,
         days=days,
         hours_per_day=hours_per_day,
@@ -56,59 +79,48 @@ def run_papermind(
         embedder=None,
     )
 
-    result    = None
-    max_tries = 4
+    result = crew.kickoff()
 
-    def _parse_wait(err: str) -> float:
-        m = re.search(r"try again in (\d+(?:\.\d+)?)s", err, re.I)
-        return float(m.group(1)) + 5 if m else 35.0
-
-    for attempt in range(1, max_tries+1):
-        try:
-            result = crew.kickoff()
-            break
-        except Exception as e:
-            err = str(e).lower()
-            is_rl = any(x in err for x in
-                        ["rate limit","ratelimit","429","tokens per minute",
-                         "rate_limit_exceeded"])
-            if is_rl and attempt < max_tries:
-                wait = _parse_wait(str(e))
-                print(f"\n[ScholarMind] Rate limit (attempt {attempt}/{max_tries}). "
-                      f"Waiting {wait:.0f}s…\n")
-                time.sleep(wait)
-                # Rebuild crew with fresh state
-                agents, tasks = build_research_tasks(
-                    topic=topic, research_question=research_question,
-                    days=days, hours_per_day=hours_per_day,
-                    include_planner=include_planner,
-                )
-                crew = Crew(agents=agents, tasks=tasks,
-                            process=Process.sequential,
-                            verbose=True, memory=False, embedder=None)
-            else:
-                raise
-
-    # Extract per-task outputs
-    keys = ["papers","extractions","map","gaps","lit_review"]
+    keys = ["papers", "extractions", "map", "gaps", "lit_review"]
     if include_planner:
         keys.append("study_plan")
 
-    outputs = {}
-    for i, task in enumerate(tasks):
+    outputs = {"papers": papers_display}
+    for i, task in enumerate(tasks[1:], start=1):
         key = keys[i] if i < len(keys) else f"task_{i}"
         try:
             raw = ""
             if task.output:
-                if hasattr(task.output,"raw") and task.output.raw:
+                if hasattr(task.output, "raw") and task.output.raw:
                     raw = task.output.raw
-                elif hasattr(task.output,"result") and task.output.result:
+                elif hasattr(task.output, "result") and task.output.result:
                     raw = str(task.output.result)
                 else:
                     raw = str(task.output)
             outputs[key] = raw
         except Exception as e:
-            outputs[key] = f"[Error: {e}]"
+            outputs[key] = f"[Error extracting output: {e}]"
+
+    # Curated paper list is still the authoritative papers output.
+    outputs.setdefault("extractions", "")
+    outputs.setdefault("map", "")
+    outputs.setdefault("gaps", "")
+    outputs.setdefault("lit_review", "")
+    if include_planner:
+        outputs.setdefault("study_plan", "")
 
     outputs["raw"] = str(result) if result else ""
     return outputs
+
+
+if __name__ == "__main__":
+    result = run_papermind(
+        topic="Agentic AI and Multi-Agent Systems",
+        research_question="What are the key architectures and unsolved problems?",
+        days=7,
+        hours_per_day=3,
+    )
+    print("\n=== PAPERS ===")
+    print(result.get("papers", "No output"))
+    print("\n=== LIT REVIEW DRAFT ===")
+    print(result.get("lit_review", "No output"))

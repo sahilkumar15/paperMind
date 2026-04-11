@@ -6,14 +6,9 @@ Works with any LangChain version (0.1 through 0.3+).
 
 This version is fully offline-safe:
 - Uses Groq/OpenAI only when provider/model/key are valid
-- Uses local HuggingFace only if available
-- Falls back to a deterministic extractive answerer with no API and no model download
-
-So build_index.py and KatzBot chat keep working even with:
-- no Groq/OpenAI key
-- invalid model/provider combination
-- blocked HuggingFace download
-- no local generation model installed
+- Uses local HuggingFace only if available locally
+- Falls back to a deterministic extractive answerer
+- Filters out noisy QA-pair docs for important question types
 """
 
 import os
@@ -40,7 +35,7 @@ Guidelines:
   "I don't have that specific information. Please check yu.edu/katz \
   or email katz@yu.edu"
 - Never invent information not present in the context.
-- Keep answers 2-5 sentences unless more detail is needed.
+- Keep answers concise but informative.
 
 Context:
 {context}
@@ -126,14 +121,42 @@ def _provider_config_is_valid() -> tuple[bool, str]:
         return False, f"llm_config validation failed: {e}"
 
 
+def _question_intent(question: str) -> str:
+    q = question.lower()
+    if any(x in q for x in ["event", "events", "upcoming", "info session", "workshop", "symposium"]):
+        return "events"
+    if any(x in q for x in ["who is", "prof", "professor", "faculty", "contact"]):
+        return "faculty"
+    if any(x in q for x in ["tuition", "financial aid", "scholarship", "cost"]):
+        return "money"
+    if any(x in q for x in ["apply", "admission", "deadline", "requirements"]):
+        return "admissions"
+    if any(x in q for x in ["curriculum", "course", "credits", "program", "programs"]):
+        return "programs"
+    return "general"
+
+
+def _filter_docs_for_question(question: str, docs: list) -> list:
+    if not docs:
+        return []
+
+    intent = _question_intent(question)
+
+    if intent in {"faculty", "events", "money", "admissions", "programs"}:
+        official = [d for d in docs if d.metadata.get("type") != "qa_pair"]
+        if official:
+            return official[:4]
+
+    return docs[:4]
+
+
 def _tokenize(text: str) -> list[str]:
     toks = re.findall(r"[a-zA-Z][a-zA-Z0-9+.-]*", text.lower())
     return [t for t in toks if t not in STOPWORDS and len(t) > 2]
 
 
 def _clean_sentence(s: str) -> str:
-    s = re.sub(r"\s+", " ", s).strip(" -•\n\t")
-    return s
+    return re.sub(r"\s+", " ", s).strip(" -•\n\t")
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -159,13 +182,16 @@ def _extract_faculty_answer(context: str, question: str) -> str | None:
 
     blocks = re.split(r"\n\n---\n\n", context)
     candidates = []
+
     for block in blocks:
         if "FACULTY PROFILE" not in block and "honggang wang" not in block.lower():
             continue
+
         score = 0
         for tok in _tokenize(question):
             if tok in block.lower():
                 score += 2
+
         if score <= 0:
             continue
 
@@ -183,8 +209,7 @@ def _extract_faculty_answer(context: str, question: str) -> str | None:
         if email:
             parts.append(f"Email: {email.group(1).strip()}")
         if exp:
-            exp_text = exp.group(1).strip()
-            exp_items = [e.strip() for e in exp_text.split(",")[:5] if e.strip()]
+            exp_items = [e.strip() for e in exp.group(1).split(",")[:5] if e.strip()]
             if exp_items:
                 parts.append("Expertise: " + ", ".join(exp_items))
         if note:
@@ -195,6 +220,7 @@ def _extract_faculty_answer(context: str, question: str) -> str | None:
 
     if not candidates:
         return None
+
     candidates.sort(key=lambda x: x[0], reverse=True)
     return candidates[0][1]
 
@@ -203,21 +229,28 @@ def _best_sentences(context: str, question: str, k: int = 4) -> list[str]:
     q_tokens = _tokenize(question)
     q_counts = Counter(q_tokens)
     sents = _split_sentences(context)
+
     scored = []
     for sent in sents:
         s_low = sent.lower()
         s_tokens = _tokenize(sent)
         if not s_tokens:
             continue
+
         overlap = sum(q_counts[t] for t in s_tokens if t in q_counts)
         bonus = 0
         if "http" in s_low or "yu.edu" in s_low:
             bonus += 1
-        if any(x in s_low for x in ["email:", "deadline", "tuition", "credits", "curriculum", "contact", "apply"]):
+        if any(x in s_low for x in [
+            "email:", "deadline", "tuition", "credits", "curriculum",
+            "contact", "apply", "financial aid"
+        ]):
             bonus += 1
+
         score = overlap + bonus
         if score > 0:
             scored.append((score, sent))
+
     scored.sort(key=lambda x: x[0], reverse=True)
 
     out = []
@@ -244,7 +277,12 @@ class ExtractiveFallbackLLM:
             filled_prompt,
             flags=re.DOTALL,
         )
-        question_match = re.search(r"Question:\s*(.*?)\n\nAnswer:", filled_prompt, flags=re.DOTALL)
+        question_match = re.search(
+            r"Question:\s*(.*?)\n\nAnswer:",
+            filled_prompt,
+            flags=re.DOTALL,
+        )
+
         context = context_match.group(1).strip() if context_match else ""
         question = question_match.group(1).strip() if question_match else ""
 
@@ -261,6 +299,7 @@ class ExtractiveFallbackLLM:
 
         answer = " ".join(top)
         answer = re.sub(r"\s+", " ", answer).strip()
+        answer = answer.replace("Q: ", "").replace("A: ", "")
         return answer[:1200]
 
 
@@ -303,6 +342,7 @@ def _get_hf_llm():
     local_files_only = os.getenv("KATZBOT_HF_LOCAL_FILES_ONLY", "1").strip().lower() in {
         "1", "true", "yes", "y", "on"
     }
+
     print(
         f"[Chain] Loading local HuggingFace model: {model_name} "
         f"(local_files_only={local_files_only})"
@@ -356,6 +396,8 @@ class KatzRAGChain:
             except Exception as e:
                 docs = []
                 print(f"[Chain] Retrieval error: {e}")
+
+        docs = _filter_docs_for_question(question, docs)
 
         context = _format_docs(docs)
         history_str = _format_history(history)

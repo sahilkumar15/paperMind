@@ -3,6 +3,11 @@ katzbot/events_fetcher.py
 ==========================
 Fetches Katz School + YU events from live pages.
 Caches for 6 hours. Falls back to static known events.
+
+Improved:
+- filters out generic site-navigation "events"
+- prioritizes real Katz events, info sessions, symposiums, clubs
+- gives better topic matching
 """
 
 import re
@@ -17,7 +22,7 @@ except ImportError:
     from langchain.schema import Document
 
 EVENTS_CACHE = Path(__file__).parent / "events_cache.json"
-CACHE_TTL    = 6 * 3600  # 6 hours
+CACHE_TTL = 6 * 3600  # 6 hours
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ScholarMind/1.0)"}
 
@@ -29,122 +34,177 @@ EVENT_URLS = [
     "https://www.yu.edu/katz/research-symposium-2025",
 ]
 
-# Static events — always available as fallback
 STATIC_EVENTS = [
     {
-        "title":       "Katz School CS & AI Club Ideathon 2026",
-        "date":        "April 13, 2026",
-        "time":        "11:45 AM EDT",
-        "location":    "Online (Devpost)",
-        "description": "Innovation challenge for Katz School students and faculty. "
-                       "Sponsored by Google Developers Group. Judge: Prof. Honggang Wang.",
-        "url":         "https://katz-ideathon-2026.devpost.com",
-        "category":    "CS & AI Club",
-        "type":        "competition",
+        "title": "Katz School CS & AI Club Ideathon 2026",
+        "date": "April 13, 2026",
+        "time": "11:45 AM EDT",
+        "location": "Online (Devpost)",
+        "description": "Innovation challenge for Katz School students and faculty. Sponsored by Google Developers Group. Judge: Prof. Honggang Wang.",
+        "url": "https://katz-ideathon-2026.devpost.com",
+        "category": "CS & AI Club",
+        "type": "competition",
     },
     {
-        "title":       "Katz School Research Symposium 2025",
-        "date":        "Spring 2025",
-        "time":        "TBD",
-        "location":    "Yeshiva University, New York",
-        "description": "Annual symposium showcasing research across AI, CS, "
-                       "Cybersecurity, Data Analytics, and Health Sciences.",
-        "url":         "https://www.yu.edu/katz/research-symposium-2025",
-        "category":    "Research",
-        "type":        "symposium",
+        "title": "Katz School Research Symposium 2025",
+        "date": "Spring 2025",
+        "time": "TBD",
+        "location": "Yeshiva University, New York",
+        "description": "Annual symposium showcasing research across AI, CS, Cybersecurity, Data Analytics, and Health Sciences.",
+        "url": "https://www.yu.edu/katz/research-symposium-2025",
+        "category": "Research",
+        "type": "symposium",
     },
     {
-        "title":       "Katz School Admissions Information Sessions",
-        "date":        "Rolling — check website",
-        "time":        "Various",
-        "location":    "Online and In-Person",
-        "description": "Meet faculty and current students for all Katz programs. "
-                       "Register at yu.edu/katz/info-sessions.",
-        "url":         "https://www.yu.edu/katz/info-sessions",
-        "category":    "Admissions",
-        "type":        "info_session",
+        "title": "Katz School Admissions Information Sessions",
+        "date": "Rolling — check website",
+        "time": "Various",
+        "location": "Online and In-Person",
+        "description": "Meet faculty and current students for all Katz programs. Register at yu.edu/katz/info-sessions.",
+        "url": "https://www.yu.edu/katz/info-sessions",
+        "category": "Admissions",
+        "type": "info_session",
     },
     {
-        "title":       "YU Graduate School Networking Events",
-        "date":        "See yu.edu/graduate/events",
-        "time":        "Various",
-        "location":    "Yeshiva University",
-        "description": "Networking nights, career fairs, research presentations, "
-                       "and faculty talks for graduate students.",
-        "url":         "https://www.yu.edu/graduate/events",
-        "category":    "Graduate School",
-        "type":        "networking",
+        "title": "YU Graduate School Networking Events",
+        "date": "See yu.edu/graduate/events",
+        "time": "Various",
+        "location": "Yeshiva University",
+        "description": "Networking nights, career fairs, research presentations, and faculty talks for graduate students.",
+        "url": "https://www.yu.edu/graduate/events",
+        "category": "Graduate School",
+        "type": "networking",
     },
     {
-        "title":       "Katz School Clubs & Organizations Meetings",
-        "date":        "Weekly during semester",
-        "time":        "Various",
-        "location":    "Katz School Campus",
-        "description": "CS & AI Club, Cybersecurity Club, Data Science Society, "
-                       "and other student organizations. See yu.edu/katz/clubs.",
-        "url":         "https://www.yu.edu/katz/clubs",
-        "category":    "Student Life",
-        "type":        "club",
+        "title": "Katz School Clubs & Organizations Meetings",
+        "date": "Weekly during semester",
+        "time": "Various",
+        "location": "Katz School Campus",
+        "description": "CS & AI Club, Cybersecurity Club, Data Science Society, and other student organizations. See yu.edu/katz/clubs.",
+        "url": "https://www.yu.edu/katz/clubs",
+        "category": "Student Life",
+        "type": "club",
     },
 ]
 
+_BAD_GENERIC_TITLES = {
+    "all events",
+    "student events",
+    "torah events",
+    "additional calendars",
+    "25live scheduling system",
+    "event marketing",
+    "step-by-step guide to event planning",
+    "catering for your events",
+    "audio visual & multimedia support",
+    "event parking requests",
+}
+
+def _is_generic_event(ev: dict) -> bool:
+    title = ev.get("title", "").strip().lower()
+    desc = ev.get("description", "").strip().lower()
+    url = ev.get("url", "").strip().lower()
+
+    if not title or len(title) < 4:
+        return True
+    if title in _BAD_GENERIC_TITLES:
+        return True
+    if "event planning" in title or "scheduling system" in title:
+        return True
+    if "catering" in title or "parking request" in title:
+        return True
+    if "all university sponsored events" in desc:
+        return True
+    if "/events/all" in url or "/events/student" in url or "youtube.com" in url:
+        return True
+
+    return False
+
+
+def _score_event(ev: dict) -> int:
+    score = 0
+    title = f"{ev.get('title','')} {ev.get('category','')} {ev.get('type','')}".lower()
+    desc = ev.get("description", "").lower()
+    url = ev.get("url", "").lower()
+
+    if "katz" in title or "katz" in desc or "/katz/" in url:
+        score += 5
+    if ev.get("type") in {"competition", "symposium", "info_session", "club", "networking"}:
+        score += 4
+    if ev.get("date") and ev.get("date", "").strip() not in {"", "TBD"}:
+        score += 2
+    if any(x in title for x in ["ai", "computer science", "cyber", "research", "club", "info session"]):
+        score += 2
+
+    return score
+
 
 def _parse_html_events(html: str, source_url: str) -> list:
-    """Extract events from HTML using multiple strategies."""
     from bs4 import BeautifulSoup
     events = []
+
     try:
         soup = BeautifulSoup(html, "lxml")
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
 
-        # Strategy 1: JSON-LD structured data
         import json as _json
         for script in soup.find_all("script", type="application/ld+json"):
             try:
-                data  = _json.loads(script.string or "")
+                data = _json.loads(script.string or "")
                 items = data if isinstance(data, list) else [data]
                 for item in items:
-                    if item.get("@type") in ("Event", "EducationEvent"):
+                    if isinstance(item, dict) and item.get("@type") in ("Event", "EducationEvent"):
                         loc = item.get("location", {})
-                        events.append({
-                            "title":       item.get("name", ""),
-                            "date":        str(item.get("startDate", "")),
-                            "time":        "",
-                            "location":    loc.get("name", "") if isinstance(loc, dict)
-                                          else str(loc),
+                        ev = {
+                            "title": item.get("name", ""),
+                            "date": str(item.get("startDate", "")),
+                            "time": "",
+                            "location": loc.get("name", "") if isinstance(loc, dict) else str(loc),
                             "description": str(item.get("description", ""))[:300],
-                            "url":         item.get("url", source_url),
-                            "category":    "Katz School",
-                            "type":        "event",
-                        })
+                            "url": item.get("url", source_url),
+                            "category": "Katz School",
+                            "type": "event",
+                        }
+                        if not _is_generic_event(ev):
+                            events.append(ev)
             except Exception:
                 pass
 
-        # Strategy 2: CSS selectors
-        for sel in ["article.event", ".event-item", ".views-row",
-                    "[class*='event']", ".card"]:
-            for card in soup.select(sel)[:10]:
+        for sel in ["article.event", ".event-item", ".views-row", "[class*='event']", ".card"]:
+            for card in soup.select(sel)[:12]:
                 text = card.get_text(separator=" ", strip=True)
                 if len(text) < 20:
                     continue
-                h = card.find(["h2","h3","h4"])
-                title = h.get_text(strip=True) if h else text[:60]
-                te = card.find("time") or card.find(class_=re.compile(r"date|time",re.I))
-                date = (te.get("datetime","") or te.get_text(strip=True)) if te else ""
+
+                h = card.find(["h2", "h3", "h4"])
+                title = h.get_text(strip=True) if h else text[:80]
+                te = card.find("time") or card.find(class_=re.compile(r"date|time", re.I))
+                date = (te.get("datetime", "") or te.get_text(strip=True)) if te else ""
                 a = card.find("a", href=True)
                 href = a["href"] if a else ""
-                url = href if href.startswith("http") else f"https://www.yu.edu{href}"
+                url = href if href.startswith("http") else f"https://www.yu.edu{href}" if href else source_url
+
+                ev = {
+                    "title": title[:120],
+                    "date": date[:50],
+                    "time": "",
+                    "location": "Yeshiva University",
+                    "description": text[:300],
+                    "url": url,
+                    "category": "Katz School",
+                    "type": "event",
+                }
+
+                if _is_generic_event(ev):
+                    continue
+
                 if title not in [e["title"] for e in events]:
-                    events.append({
-                        "title": title[:120], "date": date[:50], "time": "",
-                        "location": "Yeshiva University",
-                        "description": text[:300],
-                        "url": url or source_url,
-                        "category": "Katz School", "type": "event",
-                    })
+                    events.append(ev)
+
     except Exception as e:
         print(f"[Events] Parse error: {e}")
+
     return events
 
 
@@ -163,7 +223,7 @@ def fetch_events(force_refresh: bool = False) -> list:
             pass
 
     all_events = []
-    seen       = set()
+    seen = set()
 
     for url in EVENT_URLS:
         try:
@@ -171,7 +231,7 @@ def fetch_events(force_refresh: bool = False) -> list:
             if resp.status_code == 200:
                 evs = _parse_html_events(resp.text, url)
                 for ev in evs:
-                    t = ev.get("title","").lower().strip()
+                    t = ev.get("title", "").lower().strip()
                     if t and t not in seen and len(t) > 5:
                         seen.add(t)
                         all_events.append(ev)
@@ -179,12 +239,13 @@ def fetch_events(force_refresh: bool = False) -> list:
         except Exception as e:
             print(f"[Events] Failed {url}: {e}")
 
-    # Always add static events
     for ev in STATIC_EVENTS:
-        if ev["title"].lower() not in seen:
-            seen.add(ev["title"].lower())
+        t = ev["title"].lower().strip()
+        if t not in seen:
+            seen.add(t)
             all_events.append(ev)
 
+    all_events.sort(key=_score_event, reverse=True)
     print(f"[Events] Total: {len(all_events)} events")
 
     try:
@@ -216,41 +277,49 @@ def get_events_documents(events: list = None) -> list:
         docs.append(Document(
             page_content=text,
             metadata={
-                "source":   ev.get("url", "https://www.yu.edu/katz/events"),
-                "title":    ev.get("title",""),
-                "type":     "event",
-                "category": ev.get("category",""),
+                "source": ev.get("url", "https://www.yu.edu/katz/events"),
+                "title": ev.get("title", ""),
+                "type": "event",
+                "category": ev.get("category", ""),
             }
         ))
 
     summary = "KATZ SCHOOL UPCOMING EVENTS:\n\n"
-    for ev in events:
+    for ev in events[:10]:
         summary += f"• {ev.get('title','')} — {ev.get('date','TBD')} — {ev.get('url','')}\n"
+
     docs.append(Document(
         page_content=summary,
-        metadata={"source": "https://www.yu.edu/katz/events",
-                  "title":  "Katz Events Summary", "type": "events_summary"}
+        metadata={
+            "source": "https://www.yu.edu/katz/events",
+            "title": "Katz Events Summary",
+            "type": "events_summary",
+        }
     ))
     return docs
 
 
 def match_events_to_topic(events: list, topic: str, top_k: int = 3) -> list:
-    """Find events relevant to a research topic."""
+    """Find events relevant to a topic."""
     topic_lower = topic.lower()
-    keywords    = [w for w in topic_lower.split() if len(w) > 3]
-    boost       = ["ai", "artificial intelligence", "computer science", "cybersecurity",
-                   "data", "research", "seminar", "workshop", "symposium"]
+    keywords = [w for w in re.findall(r"[a-zA-Z]+", topic_lower) if len(w) > 2]
     scored = []
+
     for ev in events:
-        score    = 0
-        ev_text  = f"{ev.get('title','')} {ev.get('description','')} {ev.get('category','')}".lower()
+        score = 0
+        ev_text = f"{ev.get('title','')} {ev.get('description','')} {ev.get('category','')} {ev.get('type','')}".lower()
+
         for kw in keywords:
             if kw in ev_text:
-                score += 2
-        for bw in boost:
-            if bw in ev_text:
-                score += 1
+                score += 3
+
+        if "katz" in ev_text:
+            score += 2
+
+        score += _score_event(ev)
+
         if score > 0:
             scored.append((score, ev))
+
     scored.sort(key=lambda x: x[0], reverse=True)
     return [ev for _, ev in scored[:top_k]]
