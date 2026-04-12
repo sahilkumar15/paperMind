@@ -1,0 +1,151 @@
+/* static\styles.css */
+/* =========================================================
+   KatzScholarMind - External Stylesheet
+   ========================================================= */
+
+/* ---------- Main hero ---------- */
+.ksm-hero {
+  background: linear-gradient(135deg, rgba(10,18,40,.96), rgba(14,22,38,.93));
+  border: 1px solid rgba(88,166,255,.22);
+  border-radius: 20px;
+  padding: 1.65rem 1.8rem 1.3rem 1.8rem;
+  box-shadow: 0 10px 28px rgba(0,0,0,.18);
+  margin-bottom: 1.1rem;
+}
+
+.ksm-kicker {
+  font-size: 0.88rem;
+  letter-spacing: 0.12em;
+  color: #58A6FF;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.ksm-title {
+  font-size: 3rem;
+  font-weight: 800;
+  margin: 0.2rem 0 0.55rem 0;
+  line-height: 1.08;
+  color: #F0F6FC;
+}
+
+.ksm-title em {
+  color: #58A6FF;
+  font-style: italic;
+}
+
+.ksm-sub {
+  color: #B8C5D6;
+  font-size: 1.14rem;
+  line-height: 1.65;
+  margin: 0;
+  font-weight: 400;
+}
+
+/* ---------- Wrapped tabs ---------- */
+.stTabs [data-baseweb="tab-list"] {
+  gap: 0.45rem;
+  flex-wrap: wrap !important;
+  overflow: visible !important;
+}
+
+.stTabs [data-baseweb="tab-border"] {
+  display: none;
+}
+
+.stTabs [data-baseweb="tab"] {
+  height: auto !important;
+  background: rgba(88,166,255,.08);
+  border: 1px solid rgba(88,166,255,.16);
+  border-radius: 999px !important;
+  padding: 0.5rem 1rem !important;
+  white-space: nowrap !important;
+  margin: 0 !important;
+  font-size: 0.97rem !important;
+  font-weight: 500 !important;
+}
+
+.stTabs [aria-selected="true"] {
+  background: rgba(255,95,95,.12) !important;
+  border-color: rgba(255,95,95,.38) !important;
+}
+
+/* ---------- Chat title boxes ---------- */
+.ksm-titlebox {
+  background: linear-gradient(180deg, rgba(22,27,34,.92), rgba(13,17,23,.96));
+  border: 1px solid #30363D;
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.ksm-titlebox .t1 {
+  font-size: 1.9rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.ksm-titlebox .t2 {
+  color: #8B949E;
+  margin-top: 0.35rem;
+  font-size: 0.96rem;
+  line-height: 1.5;
+}
+
+/* ---------- Chat message rounding ---------- */
+div[data-testid="stVerticalBlock"] div.stChatMessage {
+  border-radius: 12px;
+}
+
+/* ---------- Optional utility cards ---------- */
+.ksm-note-info {
+  background: #0A1628;
+  border: 1px solid #1F6FEB;
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  font-size: 0.84rem;
+  color: #58A6FF;
+  margin-bottom: 1rem;
+}
+
+.ksm-note-warn {
+  background: #1C1A10;
+  border: 1px solid #D29922;
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  font-size: 0.84rem;
+  color: #D29922;
+  margin-bottom: 1rem;
+}
+
+.ksm-note-success {
+  background: #0D1F12;
+  border: 1px solid #3FB950;
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  font-size: 0.84rem;
+  color: #3FB950;
+  margin-bottom: 1rem;
+}
+
+/* ---------- Responsive tweaks ---------- */
+@media (max-width: 900px) {
+  .ksm-hero {
+    padding: 1.25rem 1.15rem 1rem 1.15rem;
+  }
+
+  .ksm-kicker {
+    font-size: 0.76rem;
+    letter-spacing: 0.1em;
+  }
+
+  .ksm-title {
+    font-size: 2.3rem;
+  }
+
+  .ksm-sub {
+    font-size: 1rem;
+    line-height: 1.55;
+  }
+}
